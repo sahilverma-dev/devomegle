@@ -1,186 +1,86 @@
-import { createServer } from "http";
-import express from "express";
 import { Server, Socket } from "socket.io";
-import cors from "cors";
 
-interface User {
+interface UserInfo {
   uid: string;
   displayName: string;
-  email: string;
   photoURL: string;
 }
 
-const userMap: Map<string, User> = new Map();
+interface UserQueueItem {
+  socketId: string;
+  userInfo: UserInfo;
+  timeout: NodeJS.Timer;
+}
 
-const app = express();
-const PORT = process.env.PORT || 4000;
-const ORIGIN = process.env.ORIGIN || `*`;
-
-const server = createServer(app);
-
-app.use(cors());
-
-const io = new Server(server, {
+const QUEUE_TIMEOUT = 30000;
+const io = new Server(4000, {
   cors: {
-    origin: ORIGIN,
+    origin: "*",
+    methods: ["GET", "POST"],
   },
 });
 
-interface User {
-  uid: string;
-  displayName: string;
-  email: string;
-}
-
-interface ConnectedUser {
-  user: User;
-  roomId: string;
-  socketId: string;
-}
-
-interface JoinPayload {
-  roomId: string;
-  user: User;
-}
-
-interface MessagePayload {
-  roomId: string;
-  user: User;
-  message: string;
-}
-
-class RoomService {
-  private connectedUsers: Map<string, ConnectedUser> = new Map();
-
-  addUser(socketId: string, user: User, roomId: string): void {
-    this.connectedUsers.set(socketId, { user, roomId, socketId });
-  }
-
-  removeUser(socketId: string): ConnectedUser | undefined {
-    const user = this.connectedUsers.get(socketId);
-    if (user) this.connectedUsers.delete(socketId);
-    return user;
-  }
-
-  getUsersInRoom(roomId: string): ConnectedUser[] {
-    return Array.from(this.connectedUsers.values()).filter(
-      (user) => user.roomId === roomId
-    );
-  }
-
-  getUser(socketId: string): ConnectedUser | undefined {
-    return this.connectedUsers.get(socketId);
-  }
-}
-
-// Server setup
-const roomService = new RoomService();
+const waitingQueue: UserQueueItem[] = [];
+const userSocketMap = new Map<string, string>();
 
 io.on("connection", (socket: Socket) => {
-  console.log("User connected:", socket.id);
-
-  // Heartbeat monitoring
-  let heartbeatInterval: NodeJS.Timer;
-
-  const heartbeat = () => {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = setInterval(() => {
-      socket.emit("ping");
-    }, 15000);
+  const removeFromQueue = (socketId: string) => {
+    const index = waitingQueue.findIndex((u) => u.socketId === socketId);
+    if (index !== -1) {
+      clearTimeout(waitingQueue[index].timeout);
+      waitingQueue.splice(index, 1);
+    }
   };
 
-  socket.on("pong", heartbeat);
-  heartbeat();
+  const attemptPairing = () => {
+    while (waitingQueue.length >= 2) {
+      const [user1, user2] = waitingQueue.splice(0, 2);
+      clearTimeout(user1.timeout);
+      clearTimeout(user2.timeout);
 
-  // Join room handler
-  socket.on("join", ({ roomId, user }: JoinPayload) => {
-    try {
-      if (!roomId || !user?.uid) {
-        throw new Error("Invalid join payload");
+      const socket1 = io.sockets.sockets.get(user1.socketId);
+      const socket2 = io.sockets.sockets.get(user2.socketId);
+
+      if (socket1?.connected && socket2?.connected) {
+        userSocketMap.set(user1.userInfo.uid, user1.socketId);
+        userSocketMap.set(user2.userInfo.uid, user2.socketId);
+
+        socket1.emit("matched", {
+          partner: user2.userInfo,
+          isInitiator: true,
+        });
+        socket2.emit("matched", {
+          partner: user1.userInfo,
+          isInitiator: false,
+        });
       }
+    }
+  };
 
-      // Leave previous room if any
-      const currentUser = roomService.getUser(socket.id);
-      if (currentUser) {
-        socket.leave(currentUser.roomId);
-        socket.to(currentUser.roomId).emit("userLeft", currentUser.user);
-      }
+  socket.on("joinQueue", (userInfo: UserInfo) => {
+    removeFromQueue(socket.id);
+    const timeout = setTimeout(() => {
+      socket.emit("matchFailed");
+      removeFromQueue(socket.id);
+    }, QUEUE_TIMEOUT);
 
-      // Join new room
-      socket.join(roomId);
-      roomService.addUser(socket.id, user, roomId);
+    waitingQueue.push({ socketId: socket.id, userInfo, timeout });
+    attemptPairing();
+  });
 
-      // Notify room members
-      socket.to(roomId).emit("userJoined", user);
-
-      // Send current room users to the new member
-      const usersInRoom = roomService
-        .getUsersInRoom(roomId)
-        .map((u) => u.user)
-        .filter((u) => u.uid !== user.uid);
-
-      socket.emit("currentUsers", usersInRoom);
-    } catch (error) {
-      socket.emit(
-        "error",
-        error instanceof Error ? error.message : "Unknown error"
-      );
+  socket.on("signal", ({ to, signal }) => {
+    const targetSocketId = userSocketMap.get(to);
+    if (targetSocketId) {
+      socket.to(targetSocketId).emit("signal", signal);
     }
   });
 
-  // Message handler
-  socket.on("message", ({ message, user, roomId }: MessagePayload) => {
-    try {
-      if (!message?.trim() || !user?.uid || !roomId) {
-        throw new Error("Invalid message payload");
-      }
-
-      const connectedUser = roomService.getUser(socket.id);
-      if (!connectedUser || connectedUser.roomId !== roomId) {
-        throw new Error("User not in room");
-      }
-
-      io.to(roomId).emit("message", {
-        user,
-        message: message.trim(),
-        timestamp: new Date(),
-      });
-    } catch (error) {
-      socket.emit(
-        "error",
-        error instanceof Error ? error.message : "Message delivery failed"
-      );
-    }
-  });
-
-  // Disconnection handler
   socket.on("disconnect", () => {
-    clearInterval(heartbeatInterval);
-    const disconnectedUser = roomService.removeUser(socket.id);
-    if (disconnectedUser) {
-      socket
-        .to(disconnectedUser.roomId)
-        .emit("userLeft", disconnectedUser.user);
-      console.log(`User ${disconnectedUser.user.displayName} disconnected`);
-    }
-  });
-
-  // Voluntary leave handler
-  socket.on("leave", () => {
-    const user = roomService.removeUser(socket.id);
-    if (user) {
-      socket.leave(user.roomId);
-      socket.to(user.roomId).emit("userLeft", user.user);
-    }
+    removeFromQueue(socket.id);
+    userSocketMap.forEach((value, key) => {
+      if (value === socket.id) userSocketMap.delete(key);
+    });
   });
 });
 
-console.clear();
-
-server.listen(PORT, () => {
-  console.log("Server is running on port", PORT);
-});
-
-app.get("/", (req, res) => {
-  res.send("Server is running");
-});
+console.log("Signaling server running on port 4000");
