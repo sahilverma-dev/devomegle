@@ -19,7 +19,7 @@ const Router = () => {
         }
       />
       <Route
-        path="room:id"
+        path="room/:id"
         element={
           <ProtectedRoute>
             <Room />
