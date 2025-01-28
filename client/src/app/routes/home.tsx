@@ -1,9 +1,12 @@
-import { VideoChat } from "@/components/client";
+// import VideoChat from "@/components/client";
+
+import Chat from "@/components/chat";
 
 const HomeRoute = () => {
   return (
     <div>
-      <VideoChat />
+      <Chat />
+      {/* <VideoChat /> */}
     </div>
   );
 };

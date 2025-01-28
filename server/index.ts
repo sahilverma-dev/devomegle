@@ -1,14 +1,17 @@
 import { Server, Socket } from "socket.io";
 
-interface UserInfo {
+interface User {
   uid: string;
   displayName: string;
+  email: string;
   photoURL: string;
 }
 
+export type UserMap = Map<string, User>;
+
 interface UserQueueItem {
   socketId: string;
-  userInfo: UserInfo;
+  user: User;
   timeout: NodeJS.Timer;
 }
 
@@ -23,69 +26,58 @@ const io = new Server(4000, {
 const waitingQueue: UserQueueItem[] = [];
 const socketPairMap = new Map<string, string>();
 
-io.on("connection", (socket: Socket) => {
-  console.log(`[Server] New connection: ${socket.id}`);
 
-  const removeFromQueue = (socketId: string) => {
-    const index = waitingQueue.findIndex((u) => u.socketId === socketId);
-    if (index !== -1) {
-      console.log(`[Server] Removing from queue: ${socketId}`);
-      clearTimeout(waitingQueue[index].timeout);
-      waitingQueue.splice(index, 1);
-    }
-  };
+const roomId = "TEMP_ROOM";
 
-  const attemptPairing = () => {
-    while (waitingQueue.length >= 2) {
-      const [user1, user2] = waitingQueue.splice(0, 2);
-      clearTimeout(user1.timeout);
-      clearTimeout(user2.timeout);
 
-      console.log(`[Server] Paired ${user1.socketId} <> ${user2.socketId}`);
-      socketPairMap.set(user1.socketId, user2.socketId);
-      socketPairMap.set(user2.socketId, user1.socketId);
+const users: UserMap = new Map();
+const socketIdToRoom: Map<string, string> = new Map();
 
-      io.to(user1.socketId).emit("matched", {
-        partner: user2.userInfo,
-        partnerSocketId: user2.socketId,
-        isInitiator: true,
-      });
+io.on("connection", (socket) => {
+  console.log("a user connected");
 
-      io.to(user2.socketId).emit("matched", {
-        partner: user1.userInfo,
-        partnerSocketId: user1.socketId,
-        isInitiator: false,
-      });
-    }
-  };
-
-  socket.on("joinQueue", (userInfo: UserInfo) => {
-    console.log(`[Server] ${socket.id} joined queue`);
-    removeFromQueue(socket.id);
-    const timeout = setTimeout(() => {
-      socket.emit("matchFailed");
-      removeFromQueue(socket.id);
-    }, QUEUE_TIMEOUT);
-
-    waitingQueue.push({ socketId: socket.id, userInfo, timeout });
-    attemptPairing();
-  });
-
-  socket.on("signal", ({ to, signal }) => {
-    console.log(`[Server] ${socket.id} → ${to} [${signal.type}]`);
-    socket.to(to).emit("signal", signal);
+  // Handle join and leave
+  socket.on("join", ({ roomId, user }) => {
+    socket.join(roomId);
+    socket.to(roomId).emit("join", { roomId, user });
+    socketIdToRoom.set(socket.id, roomId);
+    users.set(socket.id, user);
+    console.log(`${user?.name} joined room: ${roomId}`);
   });
 
   socket.on("disconnect", () => {
-    console.log(`[Server] ${socket.id} disconnected`);
-    const partnerId = socketPairMap.get(socket.id);
-    if (partnerId) {
-      socket.to(partnerId).emit("partnerDisconnected");
-      socketPairMap.delete(partnerId);
+    console.log("user disconnected");
+    const roomId = socketIdToRoom.get(socket.id);
+    const user = users.get(socket.id);
+    if (roomId && user) {
+      socket.to(roomId).emit("leave", { user });
+      socket.leave(roomId);
+      users.delete(socket.id);
+      socketIdToRoom.delete(socket.id);
+      socket.disconnect();
     }
-    socketPairMap.delete(socket.id);
-    removeFromQueue(socket.id);
+  });
+
+  // Handle WebRTC signaling
+  socket.on("offer", ({ offer, roomId, userBy, userTo }) => {
+    console.log(
+      `got offer from ${userBy.name} to ${userTo.name} and room ${roomId}`
+    );
+    socket.to(roomId).emit("offer", { offer, userBy });
+  });
+
+  socket.on("answer", ({ answer, roomId, userBy, userTo }) => {
+    console.log(
+      `got answer from ${userBy.name} to ${userTo.name} and room ${roomId}`
+    );
+    socket.to(roomId).emit("answer", { answer, userBy });
+  });
+
+  socket.on("ice-candidate", ({ candidate, roomId, userBy }) => {
+    socket.to(roomId).emit("ice-candidate", { candidate, userBy });
   });
 });
+
+console.clear()
 
 console.log("Signaling server running on port 4000");

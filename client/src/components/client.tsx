@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
-import { useAuth } from "@/hooks/useAuth";
-import { Button } from "./ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Input } from "./ui/input";
+import { useAuth } from "@/hooks/useAuth";
+import { useWebRTC } from "@/hooks/useWebrtc";
+import { io } from "socket.io-client";
 
 interface User {
   uid: string;
@@ -12,381 +15,254 @@ interface User {
   photoURL: string;
 }
 
-interface MatchInfo {
-  partner: User;
-  partnerSocketId: string;
-  isInitiator: boolean;
-}
-
-interface ChatMessage {
-  text: string;
-  isLocal: boolean;
-  timestamp: Date;
-}
-
 const socket = io("http://localhost:4000", {
-  reconnectionAttempts: 3,
-  autoConnect: false,
+  reconnection: false,
+  // autoConnect: false
 });
 
-const iceServers = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-  ],
-};
+const Room = () => {
+  const { user: authUser } = useAuth();
 
-export const VideoChat = () => {
-  const { user } = useAuth();
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [peerConnection, setPeerConnection] =
-    useState<RTCPeerConnection | null>(null);
-  const [isMatching, setIsMatching] = useState(false);
-  const [matchInfo, setMatchInfo] = useState<MatchInfo | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [messageInput, setMessageInput] = useState("");
+  const user: User = {
+    uid: authUser?.uid as string,
+    displayName: authUser?.displayName as string,
+    email: authUser?.email as string,
+    photoURL: authUser?.photoURL as string,
+  };
 
+  const [isPeerConnected, setIsPeerConnected] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const dataChannel = useRef<RTCDataChannel | null>(null);
+  const [localMediaStream, setLocalMediaStream] = useState<MediaStream | null>(
+    null
+  );
+  const [remoteMediaStream, setRemoteMediaStream] = useState(new MediaStream());
+  const roomId = "TEMP_ROOM";
+
+  const { service } = useWebRTC();
+
+  // handling events
+  const handleJoin = useCallback(
+    async ({ user: otherUser }: { user: User }) => {
+      const offer = await service.createOffer();
+      console.log(`offer created for ${otherUser.displayName}`, offer);
+      toast.success(`${otherUser.displayName} joined the room`);
+      socket?.emit("offer", {
+        offer,
+        userTo: otherUser,
+        userBy: user,
+        roomId,
+      });
+    },
+    [service, user]
+  );
+  const handleLeave = useCallback(async ({ user }: { user: User }) => {
+    console.log(`${user.displayName} left the room`);
+
+    // removing the stream
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = new MediaStream();
+    }
+
+    toast.error(`${user.displayName} left the room`);
+  }, []);
+  const handleOffer = useCallback(
+    async ({
+      userBy: otherUser,
+      offer,
+    }: {
+      userBy: User;
+      offer: RTCSessionDescription;
+    }) => {
+      console.log(`got the offer from ${otherUser.displayName}`, offer);
+
+      const answer = await service.createAnswer(offer);
+      console.log(`created answer for ${otherUser.displayName}`, answer);
+      socket?.emit("answer", {
+        answer,
+        userTo: otherUser,
+        userBy: user,
+        roomId,
+      });
+    },
+    [service, roomId, socket]
+  );
+  const handleAnswer = useCallback(
+    async ({
+      answer,
+      userBy,
+    }: {
+      userBy: User;
+      answer: RTCSessionDescription;
+    }) => {
+      console.log(`got the answer from ${userBy.displayName}`, answer);
+
+      service.setRemoteAnswer(answer);
+    },
+    [service]
+  );
+  const handleICECandidates = useCallback(
+    async ({
+      candidate,
+      userBy,
+    }: {
+      userBy: User;
+      candidate: RTCIceCandidate;
+    }) => {
+      console.log(`got the ice candidate from ${userBy.displayName}`);
+      service.addIceCandidate(candidate);
+    },
+    []
+  );
 
   useEffect(() => {
-    if (!user) return;
-
-    const setupMedia = async () => {
+    const getUserLocalMediaStream = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+        const media = await navigator.mediaDevices.getUserMedia({
           audio: true,
+          video: true,
         });
-        setLocalStream(stream);
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
+
+        socket?.emit("join", { roomId, user });
+        setLocalMediaStream(media);
+        if (localVideoRef.current && media) {
+          localVideoRef.current.srcObject = media;
+          service.addLocalTrack(media);
         }
       } catch (error) {
-        toast.error("Failed to access camera/microphone");
+        console.log(error);
+      }
+    };
+    getUserLocalMediaStream();
+  }, []);
+
+  useEffect(() => {
+    // socket events
+    socket?.on("join", handleJoin);
+    socket?.on("leave", handleLeave);
+    socket?.on("offer", handleOffer);
+    socket?.on("answer", handleAnswer);
+    socket?.on("ice-candidate", handleICECandidates);
+
+    // peer events
+    service.peer.ontrack = (event) => {
+      console.log("got the track", event.track);
+
+      event.streams[0].getTracks().forEach((track) => {
+        setRemoteMediaStream((state) => {
+          state.addTrack(track);
+          return state;
+        });
+      });
+
+      if (remoteVideoRef.current) {
+        console.log("setting the track to remote video element");
+        remoteVideoRef.current.srcObject = remoteMediaStream;
       }
     };
 
-    setupMedia();
-
-    socket.connect();
-    socket.on("matched", handleMatched);
-    socket.on("signal", handleSignal);
-    socket.on("partnerDisconnected", handlePartnerDisconnect);
-    socket.on("matchFailed", handleMatchFailed);
+    service.peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        // Send the ICE candidate to the other peer
+        socket?.emit("ice-candidate", {
+          userBy: user,
+          candidate: event.candidate,
+          roomId,
+        });
+      }
+    };
+    service.peer.onconnectionstatechange = () => {
+      if (service.peer.connectionState === "connected") {
+        setIsPeerConnected(true);
+        console.log("Peers connected!");
+      }
+    };
 
     return () => {
-      cleanupConnection();
-      socket.disconnect();
-      socket.off("matched");
-      socket.off("signal");
-      socket.off("partnerDisconnected");
-      socket.off("matchFailed");
+      // remove the events on unmount
+      socket?.off("join", handleJoin);
+      socket?.off("leave", handleLeave);
+      socket?.off("offer", handleOffer);
+      socket?.off("answer", handleAnswer);
+      socket?.off("ice-candidate", handleICECandidates);
     };
-  }, [user]);
-
-  const handleJoinQueue = () => {
-    if (!user) return;
-    setIsMatching(true);
-    socket.emit("joinQueue", {
-      uid: user.uid,
-      displayName: user.displayName,
-      photoURL: user.photoURL,
-    });
-  };
-
-  const handleLeaveQueue = () => {
-    setIsMatching(false);
-    socket.emit("leaveQueue");
-  };
-
-  const handleEndCall = () => {
-    if (peerConnection) {
-      peerConnection.close();
-    }
-    if (matchInfo) {
-      socket.emit("partnerDisconnected", { to: matchInfo.partnerSocketId });
-    }
-    cleanupConnection();
-  };
-
-  const handleMatched = async (match: MatchInfo) => {
-    console.log("[Client] Matched with:", match.partnerSocketId);
-    toast.success(`Connected to ${match.partner.displayName}`);
-    setIsMatching(false);
-    setMatchInfo(match);
-
-    try {
-      // In handleMatched function
-      const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:19302" },
-        ],
-        iceCandidatePoolSize: 10,
-      });
-
-      // Add this before creating offers/answers
-      pc.onnegotiationneeded = async () => {
-        console.log("Negotiation needed");
-      };
-
-      setPeerConnection(pc);
-
-      // Add local media tracks
-      localStream?.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
-      });
-
-      // Setup ICE candidate handler
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("signal", {
-            to: match.partnerSocketId,
-            signal: {
-              type: "candidate",
-              candidate: event.candidate.toJSON(),
-            },
-          });
-        }
-      };
-
-      // Handle remote media
-      pc.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-          }
-        }
-      };
-
-      // Setup data channel
-      if (match.isInitiator) {
-        dataChannel.current = pc.createDataChannel("chat");
-        setupDataChannel(dataChannel.current);
-        initiateOffer(pc, match.partnerSocketId);
-      } else {
-        pc.ondatachannel = (event) => {
-          dataChannel.current = event.channel;
-          setupDataChannel(event.channel);
-        };
-      }
-
-      // Connection state monitoring
-      pc.onconnectionstatechange = () => {
-        console.log("[Client] Connection state:", pc.connectionState);
-        if (pc.connectionState === "disconnected") {
-          handlePartnerDisconnect();
-        }
-      };
-    } catch (error) {
-      console.error("[Client] Connection setup failed:", error);
-      cleanupConnection();
-    }
-  };
-
-  // Modified offer creation flow
-  const initiateOffer = async (
-    pc: RTCPeerConnection,
-    partnerSocketId: string
-  ) => {
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 500)); // Allow media setup
-
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-
-      console.log("Local offer description:", offer);
-      await pc.setLocalDescription(offer);
-
-      socket.emit("signal", {
-        to: partnerSocketId,
-        signal: pc.localDescription,
-      });
-    } catch (error) {
-      console.error("Offer creation failed:", error);
-    }
-  };
-
-  const handleSignal = async (signal: any) => {
-    if (!peerConnection || !matchInfo) {
-      console.error("Signal received without active connection");
-      return;
-    }
-
-    try {
-      console.log(`Processing ${signal.type} signal`);
-
-      if (signal.type === "offer") {
-        // Validate and set remote description
-        if (!(signal.sdp && signal.type === "offer")) {
-          throw new Error("Invalid offer received");
-        }
-
-        console.log("Setting remote description");
-        await peerConnection.setRemoteDescription(
-          new RTCSessionDescription(signal)
-        );
-
-        // Create answer with proper media configuration
-        console.log("Creating answer...");
-        const answer = await peerConnection.createAnswer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-        });
-
-        console.log("Answer created:", answer);
-        await peerConnection.setLocalDescription(answer);
-
-        // Send the finalized local description (might differ from initial answer)
-        socket.emit("signal", {
-          to: matchInfo.partnerSocketId,
-          signal: peerConnection.localDescription,
-        });
-        console.log("Answer sent to peer");
-      } else if (signal.type === "answer") {
-        // Handle final answer from peer
-        console.log("Setting final answer as remote description");
-        await peerConnection.setRemoteDescription(
-          new RTCSessionDescription(signal)
-        );
-      } else if (signal.type === "candidate" && signal.candidate) {
-        // Handle ICE candidates
-        console.log("Adding ICE candidate:", signal.candidate);
-        await peerConnection.addIceCandidate(
-          new RTCIceCandidate(signal.candidate)
-        );
-      }
-
-      // Log connection progress
-      console.log("Current signaling state:", peerConnection.signalingState);
-      console.log("ICE connection state:", peerConnection.iceConnectionState);
-    } catch (error) {
-      console.error("Signal handling failed:", error);
-      toast.error("Connection error");
-      cleanupConnection();
-    }
-  };
-
-  const setupDataChannel = (channel: RTCDataChannel) => {
-    channel.onopen = () => {
-      toast.success("Chat connected");
-    };
-
-    channel.onmessage = ({ data }) => {
-      setMessages((prev) => [
-        ...prev,
-        { text: data, isLocal: false, timestamp: new Date() },
-      ]);
-    };
-  };
-
-  const sendMessage = () => {
-    if (messageInput.trim() && dataChannel.current?.readyState === "open") {
-      dataChannel.current.send(messageInput);
-      setMessages((prev) => [
-        ...prev,
-        { text: messageInput, isLocal: true, timestamp: new Date() },
-      ]);
-      setMessageInput("");
-    }
-  };
-
-  const handlePartnerDisconnect = () => {
-    toast.info("Partner disconnected");
-    cleanupConnection();
-  };
-
-  const handleMatchFailed = () => {
-    toast.error("Failed to find a match");
-    setIsMatching(false);
-  };
-
-  const cleanupConnection = () => {
-    if (peerConnection) {
-      peerConnection.close();
-      setPeerConnection(null);
-    }
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
-    }
-    if (dataChannel.current) {
-      dataChannel.current.close();
-      dataChannel.current = null;
-    }
-    setMatchInfo(null);
-  };
+  }, [
+    handleAnswer,
+    handleICECandidates,
+    handleJoin,
+    handleLeave,
+    handleOffer,
+    localMediaStream,
+    remoteMediaStream,
+    roomId,
+    service,
+    user,
+  ]);
 
   return (
-    <div className="flex flex-col h-screen p-4 bg-gray-900 text-white">
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div className="bg-black rounded-lg overflow-hidden aspect-video">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <div className="bg-black rounded-lg overflow-hidden aspect-video">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-          />
+    <div className="h-dvh ">
+      <div className="flex border-b p-4 w-full items-center justify-between">
+        <h1 className="font-bold">Room</h1>
+        <div className="flex items-center gap-2">
+          <b>Hello, {user.displayName}</b>
+          <Avatar className="border">
+            <AvatarImage src={user.photoURL} />
+            <AvatarFallback>
+              {user.displayName.split(" ").join("")}
+            </AvatarFallback>
+          </Avatar>
         </div>
       </div>
 
-      <div className="mb-4">
-        <div className="h-32 overflow-y-auto bg-gray-800 p-2 rounded-lg">
-          {messages.map((message, i) => (
-            <div
-              key={i}
-              className={`text-sm ${
-                message.isLocal ? "text-blue-300" : "text-green-300"
-              }`}
-            >
-              {message.isLocal
-                ? "You: "
-                : `${matchInfo?.partner.displayName}: `}
-              {message.text}
-            </div>
-          ))}
-        </div>
-        <div className="flex gap-2 mt-2">
-          <Input
-            value={messageInput}
-            onChange={(e) => setMessageInput(e.target.value)}
-            placeholder="Type a message..."
-            onKeyPress={(e) => e.key === "Enter" && sendMessage()}
-          />
-          <Button onClick={sendMessage}>Send</Button>
-        </div>
-      </div>
+      <div className="p-4 h-full space-y-2">
+        {/* <Button
+          onClick={() => {
+            socket?.emit("join", { roomId, user });
+          }}
+        >
+          Join the room
+        </Button> */}
+        <div
+          className="w-full h-full md:h-auto gap-4 flex flex-col md:flex-row "
+          // className="w-full grid gap-4 grid-cols-2 lg:grid-cols-3"
+        >
+          <div className="w-full flex items-center gap-4 flex-col h-full md:h-auto border rounded-xl md:aspect-video overflow-hidden">
+            <video
+              ref={localVideoRef}
+              controls={false}
+              autoPlay
+              muted
+              className=" w-full h-full object-cover"
+            />
+          </div>
 
-      <div className="flex justify-center gap-4">
-        {!matchInfo ? (
-          <Button
-            onClick={isMatching ? handleLeaveQueue : handleJoinQueue}
-            variant={isMatching ? "destructive" : "default"}
-            disabled={!user}
+          <div
+            className={cn([
+              "w-full flex items-center gap-4 flex-col h-full border rounded-xl md:aspect-video overflow-hidden",
+              !isPeerConnected && "hidden",
+            ])}
           >
-            {isMatching ? "Cancel Search" : "Start Video Chat"}
+            <video
+              ref={remoteVideoRef}
+              controls={false}
+              autoPlay
+              className=" w-full h-full object-cover"
+            />
+          </div>
+        </div>
+        {/* <div className="flex gap-2">
+          <Button
+            onClick={() => {
+              // dataChannel.send("hello");
+              console.log(remoteVideoRef);
+            }}
+          >
+            Send Message
           </Button>
-        ) : (
-          <Button onClick={handleEndCall} variant="destructive">
-            End Call
-          </Button>
-        )}
+        </div> */}
       </div>
     </div>
   );
 };
+
+export default Room;

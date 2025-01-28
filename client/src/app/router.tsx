@@ -6,6 +6,8 @@ import ProtectedRoute from "@/components/auth/protected-route";
 import Home from "./routes/home";
 import Room from "./routes/room";
 import Login from "./routes/login";
+import { WebRTCProvider } from "./providers/webrtc-provider";
+import { SocketProvider } from "./providers/socket-provider";
 
 const Router = () => {
   return (
@@ -14,7 +16,13 @@ const Router = () => {
         index
         element={
           <ProtectedRoute>
-            <Home />
+            <WebRTCProvider>
+              <SocketProvider>
+
+              
+              <Home />
+              </SocketProvider>
+            </WebRTCProvider>
           </ProtectedRoute>
         }
       />
