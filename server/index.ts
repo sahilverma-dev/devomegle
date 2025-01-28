@@ -1,34 +1,31 @@
-import { Server, Socket } from "socket.io";
+import "colors";
+import { createServer } from "http";
+import express from "express";
+import { Server } from "socket.io";
 
-interface User {
-  uid: string;
-  displayName: string;
-  email: string;
-  photoURL: string;
-}
+
+export interface User {
+    id: string;
+    name: string;
+    email: string;
+    image: string;
+  }
 
 export type UserMap = Map<string, User>;
 
-interface UserQueueItem {
-  socketId: string;
-  user: User;
-  timeout: NodeJS.Timer;
-}
 
-const QUEUE_TIMEOUT = 30000;
-const io = new Server(4000, {
+const app = express();
+
+const PORT = process.env.PORT || 4000;
+const ORIGIN = process.env.ORIGIN || `*`;
+
+const server = createServer(app);
+
+const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
+    origin: ORIGIN,
   },
 });
-
-const waitingQueue: UserQueueItem[] = [];
-const socketPairMap = new Map<string, string>();
-
-
-const roomId = "TEMP_ROOM";
-
 
 const users: UserMap = new Map();
 const socketIdToRoom: Map<string, string> = new Map();
@@ -78,6 +75,12 @@ io.on("connection", (socket) => {
   });
 });
 
-console.clear()
+console.clear();
 
-console.log("Signaling server running on port 4000");
+server.listen(PORT, () => {
+  console.log("Server is running on port", PORT);
+});
+
+app.get("/", (req, res) => {
+  res.send("Server is running");
+});
