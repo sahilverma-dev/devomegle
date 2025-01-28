@@ -14,6 +14,7 @@ interface User {
 
 interface MatchInfo {
   partner: User;
+  partnerSocketId: string;
   isInitiator: boolean;
 }
 
@@ -31,7 +32,8 @@ const socket = io("http://localhost:4000", {
 const iceServers = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
-    // Add TURN servers here if needed
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
   ],
 };
 
@@ -61,11 +63,8 @@ export const VideoChat = () => {
         setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
-          toast.success("Camera");
         }
       } catch (error) {
-        console.log(error);
-
         toast.error("Failed to access camera/microphone");
       }
     };
@@ -73,7 +72,6 @@ export const VideoChat = () => {
     setupMedia();
 
     socket.connect();
-
     socket.on("matched", handleMatched);
     socket.on("signal", handleSignal);
     socket.on("partnerDisconnected", handlePartnerDisconnect);
@@ -88,108 +86,6 @@ export const VideoChat = () => {
       socket.off("matchFailed");
     };
   }, [user]);
-
-  const cleanupConnection = () => {
-    if (peerConnection) {
-      peerConnection.close();
-      setPeerConnection(null);
-    }
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
-    }
-    if (dataChannel.current) {
-      dataChannel.current.close();
-      dataChannel.current = null;
-    }
-    setMatchInfo(null);
-  };
-
-  // const cleanupConnection = () => {
-  //   if (peerConnection) {
-  //     peerConnection.close();
-  //     setPeerConnection(null);
-  //   }
-  //   if (localStream) {
-  //     localStream.getTracks().forEach((track) => track.stop());
-  //   }
-  //   setMatchInfo(null);
-  //   dataChannel.current = null;
-  // };
-
-  const handleMatched = async (match: MatchInfo) => {
-    toast.success(`Connected to ${match.partner.displayName}`);
-    setIsMatching(false);
-    setMatchInfo(match);
-
-    try {
-      const pc = new RTCPeerConnection(iceServers);
-      setPeerConnection(pc);
-
-      // Add local stream tracks
-      localStream?.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
-      });
-
-      // Handle remote stream
-      pc.ontrack = (event) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      // ICE Candidate handling
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("signal", {
-            to: match.partner.uid,
-            signal: {
-              type: "candidate",
-              candidate: event.candidate,
-            },
-          });
-        }
-      };
-
-      // Data channel setup
-      if (match.isInitiator) {
-        dataChannel.current = pc.createDataChannel("chat");
-        setupDataChannel(dataChannel.current);
-      } else {
-        pc.ondatachannel = (event) => {
-          dataChannel.current = event.channel;
-          setupDataChannel(event.channel);
-        };
-      }
-
-      if (match.isInitiator) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit("signal", {
-          to: match.partner.uid,
-          signal: offer,
-        });
-      }
-    } catch (error) {
-      console.log(error);
-
-      toast.error("Failed to establish connection");
-      cleanupConnection();
-    }
-  };
-
-  const setupDataChannel = (channel: RTCDataChannel) => {
-    channel.onopen = () => {
-      toast.success("Chat connection established");
-    };
-
-    channel.onmessage = ({ data }) => {
-      setMessages((prev) => [
-        ...prev,
-        { text: data, isLocal: false, timestamp: new Date() },
-      ]);
-    };
-  };
 
   const handleJoinQueue = () => {
     if (!user) return;
@@ -211,84 +107,184 @@ export const VideoChat = () => {
       peerConnection.close();
     }
     if (matchInfo) {
-      socket.emit("partnerDisconnected", { to: matchInfo.partner.uid });
+      socket.emit("partnerDisconnected", { to: matchInfo.partnerSocketId });
     }
     cleanupConnection();
   };
 
-  const handlePartnerDisconnect = () => {
-    toast.info("Partner disconnected");
-    cleanupConnection();
+  const handleMatched = async (match: MatchInfo) => {
+    console.log("[Client] Matched with:", match.partnerSocketId);
+    toast.success(`Connected to ${match.partner.displayName}`);
+    setIsMatching(false);
+    setMatchInfo(match);
+
+    try {
+      // In handleMatched function
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+          { urls: "stun:stun2.l.google.com:19302" },
+        ],
+        iceCandidatePoolSize: 10,
+      });
+
+      // Add this before creating offers/answers
+      pc.onnegotiationneeded = async () => {
+        console.log("Negotiation needed");
+      };
+
+      setPeerConnection(pc);
+
+      // Add local media tracks
+      localStream?.getTracks().forEach((track) => {
+        pc.addTrack(track, localStream);
+      });
+
+      // Setup ICE candidate handler
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("signal", {
+            to: match.partnerSocketId,
+            signal: {
+              type: "candidate",
+              candidate: event.candidate.toJSON(),
+            },
+          });
+        }
+      };
+
+      // Handle remote media
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        }
+      };
+
+      // Setup data channel
+      if (match.isInitiator) {
+        dataChannel.current = pc.createDataChannel("chat");
+        setupDataChannel(dataChannel.current);
+        initiateOffer(pc, match.partnerSocketId);
+      } else {
+        pc.ondatachannel = (event) => {
+          dataChannel.current = event.channel;
+          setupDataChannel(event.channel);
+        };
+      }
+
+      // Connection state monitoring
+      pc.onconnectionstatechange = () => {
+        console.log("[Client] Connection state:", pc.connectionState);
+        if (pc.connectionState === "disconnected") {
+          handlePartnerDisconnect();
+        }
+      };
+    } catch (error) {
+      console.error("[Client] Connection setup failed:", error);
+      cleanupConnection();
+    }
   };
 
-  const handleMatchFailed = () => {
-    toast.error("Failed to find a match");
-    setIsMatching(false);
+  // Modified offer creation flow
+  const initiateOffer = async (
+    pc: RTCPeerConnection,
+    partnerSocketId: string
+  ) => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500)); // Allow media setup
+
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+
+      console.log("Local offer description:", offer);
+      await pc.setLocalDescription(offer);
+
+      socket.emit("signal", {
+        to: partnerSocketId,
+        signal: pc.localDescription,
+      });
+    } catch (error) {
+      console.error("Offer creation failed:", error);
+    }
   };
 
   const handleSignal = async (signal: any) => {
-    if (!peerConnection || !matchInfo) return;
+    if (!peerConnection || !matchInfo) {
+      console.error("Signal received without active connection");
+      return;
+    }
 
     try {
+      console.log(`Processing ${signal.type} signal`);
+
       if (signal.type === "offer") {
-        await peerConnection.setRemoteDescription(signal);
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.emit("signal", {
-          to: matchInfo.partner.uid,
-          signal: answer,
-        });
-      } else if (signal.type === "answer") {
-        await peerConnection.setRemoteDescription(signal);
-      } else if (signal.type === "candidate" && signal.candidate) {
-        try {
-          await peerConnection.addIceCandidate(
-            new RTCIceCandidate(signal.candidate)
-          );
-        } catch (error) {
-          console.error("Error adding ICE candidate:", error);
+        // Validate and set remote description
+        if (!(signal.sdp && signal.type === "offer")) {
+          throw new Error("Invalid offer received");
         }
+
+        console.log("Setting remote description");
+        await peerConnection.setRemoteDescription(
+          new RTCSessionDescription(signal)
+        );
+
+        // Create answer with proper media configuration
+        console.log("Creating answer...");
+        const answer = await peerConnection.createAnswer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
+
+        console.log("Answer created:", answer);
+        await peerConnection.setLocalDescription(answer);
+
+        // Send the finalized local description (might differ from initial answer)
+        socket.emit("signal", {
+          to: matchInfo.partnerSocketId,
+          signal: peerConnection.localDescription,
+        });
+        console.log("Answer sent to peer");
+      } else if (signal.type === "answer") {
+        // Handle final answer from peer
+        console.log("Setting final answer as remote description");
+        await peerConnection.setRemoteDescription(
+          new RTCSessionDescription(signal)
+        );
+      } else if (signal.type === "candidate" && signal.candidate) {
+        // Handle ICE candidates
+        console.log("Adding ICE candidate:", signal.candidate);
+        await peerConnection.addIceCandidate(
+          new RTCIceCandidate(signal.candidate)
+        );
       }
+
+      // Log connection progress
+      console.log("Current signaling state:", peerConnection.signalingState);
+      console.log("ICE connection state:", peerConnection.iceConnectionState);
     } catch (error) {
+      console.error("Signal handling failed:", error);
       toast.error("Connection error");
-      console.error("Signal handling error:", error);
+      cleanupConnection();
     }
   };
 
-  // const handleSignal = async (signal: any) => {
-  //   if (!peerConnection || !matchInfo) return;
+  const setupDataChannel = (channel: RTCDataChannel) => {
+    channel.onopen = () => {
+      toast.success("Chat connected");
+    };
 
-  //   try {
-  //     if (signal.type === "offer") {
-  //       await peerConnection.setRemoteDescription(signal);
-  //       const answer = await peerConnection.createAnswer();
-  //       await peerConnection.setLocalDescription(answer);
-  //       socket.emit("signal", {
-  //         to: matchInfo.partner.uid,
-  //         signal: answer,
-  //       });
-  //     } else if (signal.type === "answer") {
-  //       await peerConnection.setRemoteDescription(signal);
-  //     } else if (signal.type === "candidate") {
-  //       await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-  //     }
-
-  //     else if (signal.type === "candidate" && signal.candidate) {
-  //       try {
-  //         await peerConnection.addIceCandidate(
-  //           new RTCIceCandidate(signal.candidate)
-  //         );
-  //       } catch (error) {
-  //         console.error("Error adding ICE candidate:", error);
-  //       }
-  //     }
-  //   } catch (error) {
-  //           console.log(error)
-
-  //     toast.error("Connection error");
-  //     console.error("Signal handling error:", error);
-  //   }
-  // };
+    channel.onmessage = ({ data }) => {
+      setMessages((prev) => [
+        ...prev,
+        { text: data, isLocal: false, timestamp: new Date() },
+      ]);
+    };
+  };
 
   const sendMessage = () => {
     if (messageInput.trim() && dataChannel.current?.readyState === "open") {
@@ -301,7 +297,31 @@ export const VideoChat = () => {
     }
   };
 
-  // ... (keep other handler functions same as before)
+  const handlePartnerDisconnect = () => {
+    toast.info("Partner disconnected");
+    cleanupConnection();
+  };
+
+  const handleMatchFailed = () => {
+    toast.error("Failed to find a match");
+    setIsMatching(false);
+  };
+
+  const cleanupConnection = () => {
+    if (peerConnection) {
+      peerConnection.close();
+      setPeerConnection(null);
+    }
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      setLocalStream(null);
+    }
+    if (dataChannel.current) {
+      dataChannel.current.close();
+      dataChannel.current = null;
+    }
+    setMatchInfo(null);
+  };
 
   return (
     <div className="flex flex-col h-screen p-4 bg-gray-900 text-white">
@@ -353,16 +373,15 @@ export const VideoChat = () => {
       </div>
 
       <div className="flex justify-center gap-4">
-        <Button
-          onClick={isMatching ? handleLeaveQueue : handleJoinQueue}
-          variant={isMatching ? "destructive" : "default"}
-          disabled={!user}
-        >
-          {isMatching ? "Cancel Search" : "Start Video Chat"}
-        </Button>
-
-        {/* Update the End Call button */}
-        {matchInfo && (
+        {!matchInfo ? (
+          <Button
+            onClick={isMatching ? handleLeaveQueue : handleJoinQueue}
+            variant={isMatching ? "destructive" : "default"}
+            disabled={!user}
+          >
+            {isMatching ? "Cancel Search" : "Start Video Chat"}
+          </Button>
+        ) : (
           <Button onClick={handleEndCall} variant="destructive">
             End Call
           </Button>
