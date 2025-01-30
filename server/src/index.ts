@@ -2,17 +2,10 @@ import "colors";
 import { createServer } from "http";
 import express from "express";
 import { Server } from "socket.io";
+import { UserMap } from "./interfaces";
+import dotenv from "dotenv";
 
-
-export interface User {
-    id: string;
-    name: string;
-    email: string;
-    image: string;
-  }
-
-export type UserMap = Map<string, User>;
-
+dotenv.config();
 
 const app = express();
 
@@ -78,7 +71,7 @@ io.on("connection", (socket) => {
 console.clear();
 
 server.listen(PORT, () => {
-  console.log("Server is running on port", PORT);
+  console.log("Server is running on port".green, PORT.toString().white);
 });
 
 app.get("/", (req, res) => {
