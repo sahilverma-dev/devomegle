@@ -129,7 +129,7 @@ const Chat: React.FC<Props> = ({ roomId, onConnet, onLeft, isSearching, stranger
         const getUserLocalMediaStream = async () => {
             try {
                 const media = await navigator.mediaDevices.getUserMedia({
-                    // audio: true,
+                    audio: true,
                     video: true,
                 });
 
