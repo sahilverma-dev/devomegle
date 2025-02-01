@@ -1,486 +1,506 @@
-// import { useState, useEffect, useMemo } from 'react'
-// import {
-//     collection,
-//     query,
-//     where,
-//     getDocs,
-//     addDoc,
-//     setDoc,
-//     doc,
-//     serverTimestamp,
-//     onSnapshot,
-//     deleteDoc,
-//     updateDoc,
-//     Timestamp
-// } from 'firebase/firestore'
-// import { firestore } from '@/firebase/config'
-// import { toast } from 'sonner'
-
-// interface User {
-//     uid: string
-//     email: string | null
-//     displayName: string | null
-//     photoURL: string | null
-// }
-
-// interface Room {
-//     id: string
-//     paired: boolean
-//     createdBy: User
-//     joinedBy?: User
-//     timestamp: Timestamp
-// }
-
-// export const useMatchmaking = (user: User | null) => {
-//     const [isConnected, setIsConnected] = useState(false)
-//     const [isSearching, setIsSearching] = useState(false)
-//     const [roomId, setRoomId] = useState<string | null>(null)
-//     const [currentRoom, setCurrentRoom] = useState<Room | null>(null)
-
-//     // Computed properties for easier access to room states and stranger data
-//     const roomState = useMemo(() => {
-//         if (!currentRoom || !user) return null
-
-//         const isCreator = currentRoom.createdBy.uid === user.uid
-//         const stranger = isCreator ? currentRoom.joinedBy : currentRoom.createdBy
-
-//         return {
-//             isCreator,
-//             isPaired: currentRoom.paired,
-//             stranger,
-//             isWaiting: !currentRoom.paired && !currentRoom.joinedBy,
-//             role: isCreator ? 'creator' : 'joiner'
-//         }
-//     }, [currentRoom, user])
-
-//     // Listen for room changes
-//     useEffect(() => {
-//         if (!roomId || !user) {
-//             setIsConnected(false)
-//             return
-//         }
-
-//         const unsubscribe = onSnapshot(
-//             doc(firestore, 'room', roomId),
-//             (snapshot) => {
-//                 if (snapshot.exists()) {
-//                     const roomData = { id: snapshot.id, ...snapshot.data() } as Room
-//                     const isCreator = roomData.createdBy.uid === user.uid
-
-//                     // Update connection state based on room data
-//                     setIsConnected(roomData.paired)
-//                     setCurrentRoom(roomData)
-
-//                     // Handle stranger leaving
-//                     if (isCreator && !roomData.joinedBy && roomData.paired === false) {
-//                         toast.info('Stranger left the room. Waiting for someone new to join...')
-//                     }
-
-//                     // Handle creator leaving (for joiner)
-//                     if (!isCreator && roomData.joinedBy?.uid === user.uid && !roomData.createdBy) {
-//                         handleRoomCleanup()
-//                         toast.error('Room creator left')
-//                     }
-//                 } else {
-//                     // Room was deleted
-//                     handleRoomCleanup()
-//                     toast.error('Room was closed')
-//                 }
-//             },
-//             (error) => {
-//                 console.error('Room listener error:', error)
-//                 handleRoomCleanup()
-//                 toast.error('Error listening to room updates')
-//             }
-//         )
-
-//         return () => unsubscribe()
-//     }, [roomId, user]) // Removed currentRoom from dependencies
-
-//     // Helper function to clean up room state
-//     const handleRoomCleanup = () => {
-//         setRoomId(null)
-//         setCurrentRoom(null)
-//         setIsConnected(false)
-//         setIsSearching(false)
-//     }
-
-//     // Cleanup room when user leaves
-//     useEffect(() => {
-//         if (!roomId || !user) return
-
-//         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-//             e.preventDefault()
-//             e.returnValue = 'Are you sure you want to leave?'
-//         }
-
-//         const cleanup = async () => {
-//             try {
-//                 const roomRef = doc(firestore, 'room', roomId)
-//                 const roomSnapshot = await getDocs(query(collection(firestore, 'room'), where('id', '==', roomId)))
-
-//                 if (!roomSnapshot.empty) {
-//                     const room = { id: roomSnapshot.docs[0].id, ...roomSnapshot.docs[0].data() } as Room
-
-//                     if (room.createdBy.uid === user.uid) {
-//                         await deleteDoc(roomRef)
-//                     } else if (room.joinedBy?.uid === user.uid) {
-//                         await updateDoc(roomRef, {
-//                             paired: false,
-//                             joinedBy: null
-//                         })
-//                     }
-//                 }
-//             } catch (error) {
-//                 console.error('Cleanup error:', error)
-//             }
-//         }
-
-//         window.addEventListener('beforeunload', handleBeforeUnload)
-
-//         return () => {
-//             window.removeEventListener('beforeunload', handleBeforeUnload)
-//             cleanup()
-//         }
-//     }, [roomId, user])
-
-//     const start = async () => {
-//         if (!user) {
-//             toast.error('You must be logged in')
-//             return
-//         }
-
-//         setIsSearching(true)
-
-//         try {
-//             const roomsRef = collection(firestore, 'room')
-//             const roomsQuery = query(
-//                 roomsRef,
-//                 where('paired', '==', false),
-//                 where('joinedBy', '==', null)
-//             )
-
-//             const roomDocs = await getDocs(roomsQuery)
-//             const rooms = roomDocs.docs
-//                 .map(doc => ({ id: doc.id, ...doc.data() } as Room))
-//                 .filter(room => room.createdBy.uid !== user.uid)
-
-//             if (rooms.length === 0) {
-//                 const newRoom = await addDoc(roomsRef, {
-//                     paired: false,
-//                     joinedBy: null,
-//                     createdBy: {
-//                         uid: user.uid,
-//                         email: user.email,
-//                         displayName: user.displayName,
-//                         photoURL: user.photoURL,
-//                     },
-//                     timestamp: serverTimestamp()
-//                 })
-
-//                 setRoomId(newRoom.id)
-//                 toast.success('Waiting for someone to join...')
-//             } else {
-//                 const randomRoom = rooms[Math.floor(Math.random() * rooms.length)]
-//                 const roomRef = doc(firestore, `room/${randomRoom.id}`)
-
-//                 await setDoc(roomRef, {
-//                     paired: true,
-//                     joinedBy: {
-//                         uid: user.uid,
-//                         email: user.email,
-//                         displayName: user.displayName,
-//                         photoURL: user.photoURL,
-//                     }
-//                 }, { merge: true })
-
-//                 setRoomId(randomRoom.id)
-//                 setIsConnected(true)
-//                 toast.success('Joined room!')
-//             }
-//         } catch (error) {
-//             console.error('Start error:', error)
-//             toast.error('Failed to find room')
-//         } finally {
-//             setIsSearching(false)
-//         }
-//     }
-
-//     const leaveRoom = async () => {
-//         if (!roomId || !user) return
-
-//         try {
-//             const roomRef = doc(firestore, 'room', roomId)
-
-//             if (currentRoom?.createdBy.uid === user.uid) {
-//                 await deleteDoc(roomRef)
-//             } else if (currentRoom?.joinedBy?.uid === user.uid) {
-//                 await updateDoc(roomRef, {
-//                     paired: false,
-//                     joinedBy: null
-//                 })
-//             }
-
-//             handleRoomCleanup()
-//             toast.success('Left room')
-//         } catch (error) {
-//             console.error('Leave room error:', error)
-//             toast.error('Failed to leave room')
-//         }
-//     }
-
-//     return {
-//         isConnected,
-//         isSearching,
-//         roomId,
-//         currentRoom,
-//         roomState,
-//         start,
-//         leaveRoom
-//     }
-// }
-
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { User } from "firebase/auth";
+import { toast } from "sonner";
 import {
-    collection,
-    query,
-    where,
-    getDocs,
-    addDoc,
-    setDoc,
-    doc,
-    serverTimestamp,
-    onSnapshot,
-    deleteDoc,
-    updateDoc,
-    Timestamp
-} from 'firebase/firestore'
-import { firestore } from '@/firebase/config'
-import { toast } from 'sonner'
+  HEARTBEAT_INTERVAL_MS,
+  addCandidate,
+  claimRoom,
+  createRoom,
+  deleteRoomTree,
+  findWaitingRooms,
+  publishAnswer,
+  publishOffer,
+  resetRoomForNextJoiner,
+  sendHeartbeat,
+  subscribeToCandidates,
+  subscribeToRoom,
+  type CandidateDoc,
+  type Role,
+  type RoomWithId,
+  type SignalUser,
+} from "@/firebase/rooms";
+import { useWebRTC } from "@/hooks/useWebRTC";
+import type { MediaMode } from "@/providers/WebRTCProvider";
 
-interface User {
-    uid: string
-    email: string | null
-    displayName: string | null
-    photoURL: string | null
-}
+export type ChatStatus =
+  | "lobby"
+  | "searching"
+  | "waiting"
+  | "connecting"
+  | "matched";
 
-interface Room {
-    id: string
-    paired: boolean
-    createdBy: User
-    joinedBy?: User
-    timestamp: Timestamp
-}
+const shuffle = <T,>(items: T[]): T[] => {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swap]] = [copy[swap], copy[index]];
+  }
+  return copy;
+};
 
-export const useMatchmaking = (user: User | null) => {
-    const [isConnected, setIsConnected] = useState(false)
-    const [isSearching, setIsSearching] = useState(false)
-    const [roomId, setRoomId] = useState<string | null>(null)
-    const [currentRoom, setCurrentRoom] = useState<Room | null>(null)
-    const previousPairedRef = useRef<boolean>(false)
+export const useMatchmaking = (authUser: User | null) => {
+  const webrtc = useWebRTC();
+  const webrtcRef = useRef(webrtc);
+  webrtcRef.current = webrtc;
 
-    const roomState = useMemo(() => {
-        if (!currentRoom || !user) return null
+  const [status, setStatus] = useState<ChatStatus>("lobby");
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
+  const [room, setRoom] = useState<RoomWithId | null>(null);
+  const [mode, setMode] = useState<MediaMode>("video");
 
-        const isCreator = currentRoom.createdBy.uid === user.uid
-        const stranger = isCreator ? currentRoom.joinedBy : currentRoom.createdBy
+  const statusRef = useRef<ChatStatus>("lobby");
+  const roomIdRef = useRef<string | null>(null);
+  const roleRef = useRef<Role | null>(null);
+  const modeRef = useRef<MediaMode>("video");
+  const offerSentRef = useRef(false);
+  const answerSentRef = useRef(false);
+  const answerAppliedRef = useRef(false);
+  const remoteGoneRef = useRef(false);
+  const tearingDownRef = useRef(false);
+  const mountedRef = useRef(true);
+  const seenCandidatesRef = useRef(new Set<string>());
 
-        return {
-            isCreator,
-            isPaired: currentRoom.paired,
-            stranger,
-            isWaiting: !currentRoom.paired && !currentRoom.joinedBy,
-            role: isCreator ? 'creator' : 'joiner'
-        }
-    }, [currentRoom, user])
+  const unsubscribeRoomRef = useRef<(() => void) | null>(null);
+  const unsubscribeCandidatesRef = useRef<(() => void) | null>(null);
+  const heartbeatTimerRef = useRef<number | null>(null);
 
-    useEffect(() => {
-        if (!roomId || !user) {
-            setIsConnected(false)
-            return
-        }
+  const updateStatus = useCallback((next: ChatStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
 
-        const unsubscribe = onSnapshot(
-            doc(firestore, 'room', roomId),
-            (doc) => {
-                if (doc.exists()) {
-                    const roomData = { id: doc.id, ...doc.data() } as Room
-                    const wasConnected = previousPairedRef.current
-                    previousPairedRef.current = roomData.paired
+  const clearHeartbeat = useCallback(() => {
+    if (heartbeatTimerRef.current !== null) {
+      window.clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+  }, []);
 
-                    setCurrentRoom(roomData)
-                    setIsConnected(roomData.paired)
+  const startHeartbeat = useCallback((activeRoomId: string, activeRole: Role) => {
+    clearHeartbeat();
 
-                    const isCreator = roomData.createdBy.uid === user.uid
+    const beat = () => {
+      sendHeartbeat(activeRoomId, activeRole).catch((error) => {
+        console.error("Heartbeat failed", error);
+      });
+    };
 
-                    if (isCreator && wasConnected && !roomData.joinedBy) {
-                        setIsConnected(false)
-                        toast.info('Stranger left the room. Waiting for someone new to join...')
-                    }
+    beat();
+    heartbeatTimerRef.current = window.setInterval(
+      beat,
+      HEARTBEAT_INTERVAL_MS
+    );
+  }, [clearHeartbeat]);
 
-                    if (!isCreator && roomData.joinedBy?.uid === user.uid && !roomData.createdBy) {
-                        setRoomId(null)
-                        setCurrentRoom(null)
-                        setIsConnected(false)
-                        setIsSearching(false)
-                        toast.error('Room creator left')
-                    }
-                } else {
-                    setRoomId(null)
-                    setCurrentRoom(null)
-                    setIsConnected(false)
-                    setIsSearching(false)
-                    toast.error('Room was closed')
-                }
-            },
-            (error) => {
-                console.error('Room listener error:', error)
-                setIsConnected(false)
-                setIsSearching(false)
-                toast.error('Error listening to room updates')
-            }
-        )
+  const stopSubscriptions = useCallback(() => {
+    unsubscribeRoomRef.current?.();
+    unsubscribeRoomRef.current = null;
+    unsubscribeCandidatesRef.current?.();
+    unsubscribeCandidatesRef.current = null;
+    clearHeartbeat();
+    webrtcRef.current.setOnIceCandidate(null);
+    seenCandidatesRef.current.clear();
+  }, [clearHeartbeat]);
 
-        return () => {
-            unsubscribe()
-            previousPairedRef.current = false
-        }
-    }, [roomId, user])
+  const resetSignalingFlags = useCallback(() => {
+    offerSentRef.current = false;
+    answerSentRef.current = false;
+    answerAppliedRef.current = false;
+    remoteGoneRef.current = false;
+  }, []);
 
-    useEffect(() => {
-        if (!roomId || !user) return
+  const subscribeToCandidatesFor = useCallback(
+    (activeRoomId: string, uid: string) => {
+      unsubscribeCandidatesRef.current?.();
 
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            // e.preventDefault()
-            e.returnValue = 'Are you sure you want to leave?'
-        }
+      unsubscribeCandidatesRef.current = subscribeToCandidates(
+        activeRoomId,
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type !== "added") return;
+            if (seenCandidatesRef.current.has(change.doc.id)) return;
 
-        const cleanup = async () => {
-            try {
-                const roomRef = doc(firestore, 'room', roomId)
-                const roomDoc = await getDocs(query(collection(firestore, 'room'), where('id', '==', roomId)))
+            seenCandidatesRef.current.add(change.doc.id);
+            const data = change.doc.data() as CandidateDoc;
 
-                if (!roomDoc.empty) {
-                    const room = { id: roomDoc.docs[0].id, ...roomDoc.docs[0].data() } as Room
+            if (!data || data.from === uid) return;
 
-                    if (room.createdBy.uid === user.uid) {
-                        await deleteDoc(roomRef)
-                    } else if (room.joinedBy?.uid === user.uid) {
-                        await updateDoc(roomRef, {
-                            paired: false,
-                            joinedBy: null
-                        })
-                    }
-                }
-            } catch (error) {
-                console.error('Cleanup error:', error)
-            }
-        }
+            webrtcRef.current
+              .addRemoteCandidate(data.candidate)
+              .catch((error) =>
+                console.error("Failed to add remote candidate", error)
+              );
+          });
+        },
+        (error) => console.error("Candidate listener failed", error)
+      );
+    },
+    []
+  );
 
-        window.addEventListener('beforeunload', handleBeforeUnload)
+  const attachIcePublisher = useCallback(
+    (activeRoomId: string, uid: string) => {
+      webrtcRef.current.setOnIceCandidate((candidate) => {
+        addCandidate(activeRoomId, candidate.toJSON(), uid).catch((error) =>
+          console.error("Failed to publish ICE candidate", error)
+        );
+      });
+    },
+    []
+  );
 
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload)
-            cleanup()
-        }
-    }, [roomId, user])
+  const createOffererPeer = useCallback(
+    (activeRoomId: string, uid: string) => {
+      webrtcRef.current.createNewPeerConnection(true);
+      attachIcePublisher(activeRoomId, uid);
+    },
+    [attachIcePublisher]
+  );
 
-    const start = async () => {
-        if (!user) {
-            toast.error('You must be logged in')
-            return
-        }
+  const createAnswererPeer = useCallback(
+    (activeRoomId: string, uid: string) => {
+      webrtcRef.current.createNewPeerConnection(false);
+      attachIcePublisher(activeRoomId, uid);
+    },
+    [attachIcePublisher]
+  );
 
-        setIsSearching(true)
+  /**
+   * Clears the current match, optionally removing the room document, and
+   * returns the UI to the requested state.
+   */
+  const teardown = useCallback(
+    async (options: {
+      stopMedia?: boolean;
+      status?: ChatStatus;
+      removeRoom?: "delete" | "reset";
+    }) => {
+      if (tearingDownRef.current) return;
+      tearingDownRef.current = true;
+
+      const activeRoomId = roomIdRef.current;
+      const activeRole = roleRef.current;
+
+      stopSubscriptions();
+      webrtcRef.current.resetPeerConnection({
+        stopMedia: options.stopMedia,
+      });
+
+      roomIdRef.current = null;
+      roleRef.current = null;
+      resetSignalingFlags();
+
+      if (mountedRef.current) {
+        setRoomId(null);
+        setRole(null);
+        setRoom(null);
+        updateStatus(options.status ?? "lobby");
+      }
+
+      if (activeRoomId && activeRole) {
+        const removeRoom =
+          options.removeRoom ??
+          (activeRole === "creator" ? "delete" : "reset");
 
         try {
-            const roomsRef = collection(firestore, 'room')
-            const roomsQuery = query(
-                roomsRef,
-                where('paired', '==', false),
-                where('joinedBy', '==', null)
-            )
-
-            const roomDocs = await getDocs(roomsQuery)
-            const rooms = roomDocs.docs
-                .map(doc => ({ id: doc.id, ...doc.data() } as Room))
-                .filter(room => room.createdBy.uid !== user.uid)
-
-            if (rooms.length === 0) {
-                const newRoom = await addDoc(roomsRef, {
-                    paired: false,
-                    joinedBy: null,
-                    createdBy: {
-                        uid: user.uid,
-                        email: user.email,
-                        displayName: user.displayName,
-                        photoURL: user.photoURL,
-                    },
-                    timestamp: serverTimestamp()
-                })
-
-                setRoomId(newRoom.id)
-                toast.success('Waiting for someone to join...')
-            } else {
-                const randomRoom = rooms[Math.floor(Math.random() * rooms.length)]
-                const roomRef = doc(firestore, `room/${randomRoom.id}`)
-
-                await setDoc(roomRef, {
-                    paired: true,
-                    joinedBy: {
-                        uid: user.uid,
-                        email: user.email,
-                        displayName: user.displayName,
-                        photoURL: user.photoURL,
-                    }
-                }, { merge: true })
-
-                setRoomId(randomRoom.id)
-                setIsConnected(true)
-                toast.success('Joined room!')
-            }
+          if (removeRoom === "delete") {
+            await deleteRoomTree(activeRoomId);
+          } else {
+            await resetRoomForNextJoiner(activeRoomId);
+          }
         } catch (error) {
-            console.error('Start error:', error)
-            toast.error('Failed to find room')
-        } finally {
-            setIsSearching(false)
+          console.error("Room cleanup failed", error);
         }
-    }
+      }
 
-    const leaveRoom = async () => {
-        if (!roomId || !user) return
+      tearingDownRef.current = false;
+    },
+    [resetSignalingFlags, stopSubscriptions, updateStatus]
+  );
 
+  /**
+   * A joiner can only tear down its own half; the creator keeps the room open
+   * and waits for the next stranger.
+   */
+  const returnCreatorToWaiting = useCallback(
+    async (activeRoomId: string, uid: string) => {
+      if (roomIdRef.current !== activeRoomId) return;
+
+      webrtcRef.current.resetPeerConnection();
+      offerSentRef.current = false;
+      answerAppliedRef.current = false;
+      remoteGoneRef.current = false;
+      updateStatus("waiting");
+
+      // Build the next offerer peer *before* the room becomes claimable again,
+      // otherwise a fast joiner could arrive before we are ready to offer.
+      createOffererPeer(activeRoomId, uid);
+      subscribeToCandidatesFor(activeRoomId, uid);
+
+      try {
+        await resetRoomForNextJoiner(activeRoomId);
+      } catch (error) {
+        console.error("Failed to reset room", error);
+      }
+    },
+    [
+      createOffererPeer,
+      subscribeToCandidatesFor,
+      updateStatus,
+    ]
+  );
+
+  const handleRemoteGone = useCallback(
+    async (activeRoomId: string, activeRole: Role, uid: string) => {
+      if (remoteGoneRef.current) return;
+      remoteGoneRef.current = true;
+
+      if (activeRole === "creator") {
+        toast.info("Stranger disconnected. Waiting for someone new...");
+        await returnCreatorToWaiting(activeRoomId, uid);
+        return;
+      }
+
+      toast.error("Stranger disconnected");
+      await teardown({ status: "lobby", removeRoom: "delete", stopMedia: false });
+    },
+    [returnCreatorToWaiting, teardown]
+  );
+
+  const handleRoomSnapshot = useCallback(
+    async (room: RoomWithId, activeRole: Role, uid: string) => {
+      if (roomIdRef.current !== room.id) return;
+
+      setRoom(room);
+
+      if (activeRole === "creator") {
+        if (room.joinedBy && !room.offer && !offerSentRef.current) {
+          offerSentRef.current = true;
+          try {
+            const offer = await webrtcRef.current.createOffer();
+            if (offer) await publishOffer(room.id, offer);
+          } catch (error) {
+            console.error("Failed to publish offer", error);
+            offerSentRef.current = false;
+          }
+        }
+
+        if (room.answer && !answerAppliedRef.current) {
+          answerAppliedRef.current = true;
+          try {
+            await webrtcRef.current.setRemoteAnswer(room.answer);
+          } catch (error) {
+            console.error("Failed to apply answer", error);
+            answerAppliedRef.current = false;
+          }
+        }
+
+        if (!room.joinedBy && statusRef.current !== "waiting") {
+          await returnCreatorToWaiting(room.id, uid);
+        }
+      }
+
+      if (activeRole === "joiner" && room.offer && !answerSentRef.current) {
+        answerSentRef.current = true;
         try {
-            const roomRef = doc(firestore, 'room', roomId)
-
-            if (currentRoom?.createdBy.uid === user.uid) {
-                await deleteDoc(roomRef)
-            } else if (currentRoom?.joinedBy?.uid === user.uid) {
-                await updateDoc(roomRef, {
-                    paired: false,
-                    joinedBy: null
-                })
-            }
-
-            setRoomId(null)
-            setCurrentRoom(null)
-            setIsConnected(false)
-            setIsSearching(false)
-            toast.success('Left room')
+          const answer = await webrtcRef.current.createAnswer(room.offer);
+          if (answer) await publishAnswer(room.id, answer);
         } catch (error) {
-            console.error('Leave room error:', error)
-            toast.error('Failed to leave room')
+          console.error("Failed to publish answer", error);
+          answerSentRef.current = false;
         }
-    }
+      }
+    },
+    [handleRemoteGone, returnCreatorToWaiting]
+  );
 
-    return {
-        isConnected,
-        isSearching,
-        roomId,
-        currentRoom,
-        roomState,
-        start,
-        leaveRoom
+  const subscribeToRoomFor = useCallback(
+    (activeRoomId: string, activeRole: Role, uid: string) => {
+      unsubscribeRoomRef.current?.();
+
+      unsubscribeRoomRef.current = subscribeToRoom(
+        activeRoomId,
+        (snapshot) => {
+          handleRoomSnapshot(snapshot, activeRole, uid).catch((error) =>
+            console.error("Room handler failed", error)
+          );
+        },
+        () => {
+          if (roomIdRef.current !== activeRoomId) return;
+          if (remoteGoneRef.current) return;
+
+          if (activeRole === "creator") {
+            toast.info("Room closed. Looking for a new stranger...");
+            void teardown({ status: "lobby", removeRoom: "delete" });
+          } else {
+            toast.info("The stranger left the room");
+            void teardown({ status: "lobby", removeRoom: "reset" });
+          }
+        },
+        (error) => console.error("Room listener failed", error)
+      );
+    },
+    [handleRoomSnapshot, teardown]
+  );
+
+  const start = useCallback(
+    async (nextMode: MediaMode = "video") => {
+      if (!authUser) {
+        toast.error("You must be logged in to start a chat");
+        return;
+      }
+
+      if (tearingDownRef.current) return;
+
+      modeRef.current = nextMode;
+      setMode(nextMode);
+      resetSignalingFlags();
+      updateStatus("searching");
+
+      try {
+        await webrtcRef.current.prepareMedia(nextMode);
+      } catch (error) {
+        console.error("Media access failed", error);
+        toast.error("Camera and microphone access is required for video chat");
+        updateStatus("lobby");
+        return;
+      }
+
+      try {
+        const waitingRooms = await findWaitingRooms(authUser);
+
+        for (const candidate of shuffle(waitingRooms)) {
+          const claimed = await claimRoom(candidate.id, authUser);
+
+          if (!claimed) continue;
+
+          if (roomIdRef.current) {
+            await teardown({ status: "lobby" });
+          }
+
+          roomIdRef.current = candidate.id;
+          roleRef.current = "joiner";
+          setRoomId(candidate.id);
+          setRole("joiner");
+          setRoom(candidate);
+          createAnswererPeer(candidate.id, authUser.uid);
+          subscribeToRoomFor(candidate.id, "joiner", authUser.uid);
+          subscribeToCandidatesFor(candidate.id, authUser.uid);
+          startHeartbeat(candidate.id, "joiner");
+          updateStatus("connecting");
+          return;
+        }
+
+        const newRoomId = await createRoom(authUser);
+        roomIdRef.current = newRoomId;
+        roleRef.current = "creator";
+        setRoomId(newRoomId);
+        setRole("creator");
+        setRoom(null);
+        createOffererPeer(newRoomId, authUser.uid);
+        subscribeToRoomFor(newRoomId, "creator", authUser.uid);
+        subscribeToCandidatesFor(newRoomId, authUser.uid);
+        startHeartbeat(newRoomId, "creator");
+        updateStatus("waiting");
+      } catch (error) {
+        console.error("Matchmaking failed", error);
+        toast.error("Could not find a stranger. Please try again.");
+        await teardown({ status: "lobby" });
+      }
+    },
+    [
+      authUser,
+      createAnswererPeer,
+      createOffererPeer,
+      resetSignalingFlags,
+      startHeartbeat,
+      subscribeToCandidatesFor,
+      subscribeToRoomFor,
+      teardown,
+      updateStatus,
+    ]
+  );
+
+  const leave = useCallback(async () => {
+    await teardown({ status: "lobby", stopMedia: true });
+  }, [teardown]);
+
+  const next = useCallback(async () => {
+    const currentMode = modeRef.current;
+    await teardown({ status: "lobby", stopMedia: false });
+    await start(currentMode);
+  }, [start, teardown]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!webrtc.isPeerConnected) return;
+
+    if (
+      statusRef.current === "waiting" ||
+      statusRef.current === "connecting"
+    ) {
+      updateStatus("matched");
     }
-}
+  }, [webrtc.isPeerConnected, updateStatus]);
+
+  useEffect(() => {
+    if (webrtc.connectionState !== "failed") return;
+    if (!roomIdRef.current || !roleRef.current || !authUser) return;
+
+    void handleRemoteGone(roomIdRef.current, roleRef.current, authUser.uid);
+  }, [authUser, handleRemoteGone, webrtc.connectionState]);
+
+  useEffect(() => {
+    const bestEffortCleanup = () => {
+      const activeRoomId = roomIdRef.current;
+      const activeRole = roleRef.current;
+      if (!activeRoomId || !activeRole) return;
+
+      if (activeRole === "creator") {
+        void deleteRoomTree(activeRoomId);
+      } else {
+        void resetRoomForNextJoiner(activeRoomId);
+      }
+
+      webrtcRef.current.stopMedia();
+    };
+
+    const handleUnload = () => bestEffortCleanup();
+
+    window.addEventListener("pagehide", handleUnload);
+    window.addEventListener("beforeunload", handleUnload);
+
+    return () => {
+      window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("beforeunload", handleUnload);
+      bestEffortCleanup();
+      stopSubscriptions();
+    };
+  }, [stopSubscriptions]);
+
+  const stranger = useMemo<SignalUser | null>(() => {
+    if (!room || !role) return null;
+    return role === "creator" ? room.joinedBy : room.createdBy;
+  }, [role, room]);
+
+  return {
+    status,
+    mode,
+    roomId,
+    role,
+    room,
+    stranger,
+    isSearching: status === "searching",
+    isConnected: webrtc.isPeerConnected,
+    start,
+    leave,
+    next,
+  };
+};
