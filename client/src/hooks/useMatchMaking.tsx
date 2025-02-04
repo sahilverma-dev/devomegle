@@ -3,6 +3,7 @@ import type { User } from "firebase/auth";
 import { toast } from "sonner";
 import {
   HEARTBEAT_INTERVAL_MS,
+  STALE_AFTER_MS,
   addCandidate,
   claimRoom,
   createRoom,
@@ -14,6 +15,7 @@ import {
   sendHeartbeat,
   subscribeToCandidates,
   subscribeToRoom,
+  sweepStaleRooms,
   type CandidateDoc,
   type Role,
   type RoomWithId,
@@ -60,6 +62,7 @@ export const useMatchmaking = (authUser: User | null) => {
   const tearingDownRef = useRef(false);
   const mountedRef = useRef(true);
   const seenCandidatesRef = useRef(new Set<string>());
+  const avoidRoomIdRef = useRef<string | null>(null);
 
   const unsubscribeRoomRef = useRef<(() => void) | null>(null);
   const unsubscribeCandidatesRef = useRef<(() => void) | null>(null);
@@ -174,7 +177,7 @@ export const useMatchmaking = (authUser: User | null) => {
     async (options: {
       stopMedia?: boolean;
       status?: ChatStatus;
-      removeRoom?: "delete" | "reset";
+      removeRoom?: "delete" | "reset" | "none";
     }) => {
       if (tearingDownRef.current) return;
       tearingDownRef.current = true;
@@ -203,10 +206,15 @@ export const useMatchmaking = (authUser: User | null) => {
           options.removeRoom ??
           (activeRole === "creator" ? "delete" : "reset");
 
+        // Do not immediately re-match with the stranger we just left.
+        if (activeRole === "joiner" && removeRoom === "reset") {
+          avoidRoomIdRef.current = activeRoomId;
+        }
+
         try {
           if (removeRoom === "delete") {
             await deleteRoomTree(activeRoomId);
-          } else {
+          } else if (removeRoom === "reset") {
             await resetRoomForNextJoiner(activeRoomId);
           }
         } catch (error) {
@@ -274,6 +282,20 @@ export const useMatchmaking = (authUser: User | null) => {
 
       setRoom(room);
 
+      const otherLastSeen =
+        activeRole === "creator" ? room.joinerLastSeen : room.creatorLastSeen;
+      const strangerPresent =
+        activeRole === "creator" ? room.joinedBy !== null : true;
+
+      if (
+        strangerPresent &&
+        otherLastSeen &&
+        Date.now() - otherLastSeen.toMillis() > STALE_AFTER_MS
+      ) {
+        await handleRemoteGone(room.id, activeRole, uid);
+        return;
+      }
+
       if (activeRole === "creator") {
         if (room.joinedBy && !room.offer && !offerSentRef.current) {
           offerSentRef.current = true;
@@ -286,7 +308,9 @@ export const useMatchmaking = (authUser: User | null) => {
           }
         }
 
-        if (room.answer && !answerAppliedRef.current) {
+        // Only apply an answer for a currently paired stranger. A reset room
+        // can briefly still contain the previous answer alongside joinedBy:null.
+        if (room.joinedBy && room.answer && !answerAppliedRef.current) {
           answerAppliedRef.current = true;
           try {
             await webrtcRef.current.setRemoteAnswer(room.answer);
@@ -330,13 +354,9 @@ export const useMatchmaking = (authUser: User | null) => {
           if (roomIdRef.current !== activeRoomId) return;
           if (remoteGoneRef.current) return;
 
-          if (activeRole === "creator") {
-            toast.info("Room closed. Looking for a new stranger...");
-            void teardown({ status: "lobby", removeRoom: "delete" });
-          } else {
-            toast.info("The stranger left the room");
-            void teardown({ status: "lobby", removeRoom: "reset" });
-          }
+          // The document is already gone, so there is nothing left to clean up.
+          toast.info("The stranger closed the room");
+          void teardown({ status: "lobby", removeRoom: "none" });
         },
         (error) => console.error("Room listener failed", error)
       );
@@ -368,7 +388,11 @@ export const useMatchmaking = (authUser: User | null) => {
       }
 
       try {
-        const waitingRooms = await findWaitingRooms(authUser);
+        await sweepStaleRooms().catch(() => 0);
+        const waitingRooms = (await findWaitingRooms(authUser)).filter(
+          (candidate) => candidate.id !== avoidRoomIdRef.current
+        );
+        avoidRoomIdRef.current = null;
 
         for (const candidate of shuffle(waitingRooms)) {
           const claimed = await claimRoom(candidate.id, authUser);
