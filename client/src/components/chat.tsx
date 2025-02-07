@@ -2,8 +2,10 @@ import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CameraIcon,
+  CameraOffIcon,
   MessageCircleIcon,
   MicIcon,
+  MicOffIcon,
   SkipForwardIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,7 +30,17 @@ const Chat = ({ status, stranger }: Props) => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
-  const { localStream, remoteStream, isPeerConnected } = useWebRTC();
+  const {
+    localStream,
+    remoteStream,
+    isPeerConnected,
+    isLocalMicActive,
+    isLocalVideoActive,
+    isRemoteMicActive,
+    isRemoteVideoActive,
+    toggleLocalMic,
+    toggleLocalVideo,
+  } = useWebRTC();
 
   const isWaiting = status === "waiting" || status === "searching";
   const isConnecting = status === "connecting" && !isPeerConnected;
@@ -83,6 +95,8 @@ const Chat = ({ status, stranger }: Props) => {
               <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-neutral-950/80 px-3 py-1 text-xs">
                 <span className="h-2 w-2 rounded-full bg-green-500" />
                 You
+                {!isLocalMicActive && <MicOffIcon className="h-3 w-3" />}
+                {!isLocalVideoActive && <CameraOffIcon className="h-3 w-3" />}
               </div>
             </div>
 
@@ -105,6 +119,12 @@ const Chat = ({ status, stranger }: Props) => {
                   )}
                 />
                 {stranger?.displayName ?? "Stranger"}
+                {isPeerConnected && !isRemoteMicActive && (
+                  <MicOffIcon className="h-3 w-3" />
+                )}
+                {isPeerConnected && !isRemoteVideoActive && (
+                  <CameraOffIcon className="h-3 w-3" />
+                )}
               </div>
             </div>
 
@@ -140,18 +160,32 @@ const Chat = ({ status, stranger }: Props) => {
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => toast.info("To be implemeted 😢")}
-                className="rounded-lg bg-neutral-700 p-3 transition-colors hover:bg-neutral-600"
+                onClick={toggleLocalMic}
+                className={cn(
+                  "rounded-lg p-3 transition-colors",
+                  isLocalMicActive
+                    ? "bg-neutral-700 hover:bg-neutral-600"
+                    : "bg-red-600 hover:bg-red-700"
+                )}
                 aria-label="Toggle microphone"
+                data-testid="toggle-mic"
+                data-active={isLocalMicActive}
               >
-                <MicIcon />
+                {isLocalMicActive ? <MicIcon /> : <MicOffIcon />}
               </button>
               <button
-                onClick={() => toast.info("To be implemeted 😢")}
-                className="rounded-lg bg-neutral-700 p-3 transition-colors hover:bg-neutral-600"
+                onClick={toggleLocalVideo}
+                className={cn(
+                  "rounded-lg p-3 transition-colors",
+                  isLocalVideoActive
+                    ? "bg-neutral-700 hover:bg-neutral-600"
+                    : "bg-red-600 hover:bg-red-700"
+                )}
                 aria-label="Toggle camera"
+                data-testid="toggle-camera"
+                data-active={isLocalVideoActive}
               >
-                <CameraIcon />
+                {isLocalVideoActive ? <CameraIcon /> : <CameraOffIcon />}
               </button>
             </div>
 
