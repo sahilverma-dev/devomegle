@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CameraIcon,
@@ -8,7 +8,6 @@ import {
   MicOffIcon,
   SkipForwardIcon,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useWebRTC } from "@/hooks";
 import type { SignalUser } from "@/firebase/rooms";
@@ -26,7 +25,7 @@ interface Props {
 const initials = (user: SignalUser | null) =>
   user?.displayName?.split(" ").join("").slice(0, 2) || "??";
 
-const Chat = ({ status, stranger }: Props) => {
+const Chat = ({ status, stranger, onEnd, onNext }: Props) => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -42,8 +41,30 @@ const Chat = ({ status, stranger }: Props) => {
     toggleLocalVideo,
   } = useWebRTC();
 
+  const [isLeaving, setIsLeaving] = useState(false);
+
   const isWaiting = status === "waiting" || status === "searching";
   const isConnecting = status === "connecting" && !isPeerConnected;
+
+  const handleEnd = async () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    try {
+      await onEnd();
+    } finally {
+      setIsLeaving(false);
+    }
+  };
+
+  const handleNext = async () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    try {
+      await onNext();
+    } finally {
+      setIsLeaving(false);
+    }
+  };
 
   useEffect(() => {
     if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
@@ -191,14 +212,18 @@ const Chat = ({ status, stranger }: Props) => {
 
             <div className="flex items-center gap-2">
               <button
-                onClick={() => toast.info("To be implemeted 😢")}
-                className="rounded-lg bg-red-600 px-5 py-3 font-medium transition-colors hover:bg-red-700"
+                onClick={handleEnd}
+                disabled={isLeaving}
+                data-testid="end-chat"
+                className="rounded-lg bg-red-600 px-5 py-3 font-medium transition-colors hover:bg-red-700 disabled:opacity-60"
               >
                 End Chat
               </button>
               <button
-                onClick={() => toast.info("To be implemeted 😢")}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium transition-colors hover:bg-blue-700"
+                onClick={handleNext}
+                disabled={isLeaving}
+                data-testid="next-person"
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium transition-colors hover:bg-blue-700 disabled:opacity-60"
               >
                 <SkipForwardIcon className="h-4 w-4" />
                 Next Person
