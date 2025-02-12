@@ -21,11 +21,17 @@ const Searching = () => (
 
 const Home = () => {
   const { user } = useAuth();
-  const { status, roomId, stranger, start, leave, next } = useMatchmaking(user);
+  const { status, roomId, mode, stranger, start, leave, next } =
+    useMatchmaking(user);
 
   return (
     <>
-      {status === "lobby" && <Lobby onStart={() => start("video")} />}
+      {status === "lobby" && (
+        <Lobby
+          onStart={() => start("video")}
+          onStartText={() => start("text")}
+        />
+      )}
 
       {status !== "lobby" && !roomId && <Searching />}
 
@@ -33,6 +39,7 @@ const Home = () => {
         <Chat
           roomId={roomId}
           status={status}
+          mode={mode}
           stranger={stranger}
           onEnd={leave}
           onNext={next}
