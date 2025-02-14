@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isCreator(room) {
+      return signedIn() && room.createdBy.uid == request.auth.uid;
+    }
+
+    function isJoiner(room) {
+      return signedIn()
+        && room.joinedBy != null
+        && room.joinedBy.uid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.createdBy.uid == request.auth.uid
+        && request.resource.data.joinedBy == null;
+
+      // The creator and joiner can update signaling/heartbeat fields, and any
+      // signed-in user may atomically claim a room that is still waiting.
+      allow update: if signedIn()
+        && (
+          isCreator(resource.data)
+          || isJoiner(resource.data)
+          || (
+            resource.data.status == 'waiting'
+            && resource.data.joinedBy == null
+            && request.resource.data.joinedBy != null
+            && request.resource.data.joinedBy.uid == request.auth.uid
+          )
+        );
+
+      // Participants can close their room. Any client may remove a room that
+      // has been abandoned for two minutes so crashed tabs cannot linger.
+      allow delete: if signedIn()
+        && (
+          isCreator(resource.data)
+          || isJoiner(resource.data)
+          || resource.data.updatedAt < request.time - duration.value(2, 'm')
+        );
+
+      match /candidates/{candidateId} {
+        allow read, create, delete: if signedIn();
+      }
+    }
+  }
+}
