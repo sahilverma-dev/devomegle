@@ -51,10 +51,6 @@ const openUser = async (browser: Browser): Promise<TestUser> => {
     console.log(`[pageerror] ${error.message}`);
   });
 
-  await page.addInitScript(() => {
-    window.localStorage.setItem("devomegle:psa-seen", "1");
-  });
-
   await page.goto("/login");
   await page.getByTestId("login-guest").click();
   await expect(page.getByText("Start Chatting")).toBeVisible({

@@ -1,6 +1,5 @@
 import Chat from "@/components/chat";
 import Lobby from "@/components/lobby";
-import MafiModal from "@/components/modals/mafi-modal";
 import { useAuth } from "@/hooks";
 import { useMatchmaking } from "@/hooks/useMatchMaking";
 
@@ -45,8 +44,6 @@ const Home = () => {
           onNext={next}
         />
       )}
-
-      <MafiModal />
     </>
   );
 };
