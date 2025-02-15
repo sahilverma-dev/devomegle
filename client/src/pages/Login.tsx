@@ -1,12 +1,13 @@
 import { useAuth } from "@/hooks"
 import { FcGoogle as GoogleIcon } from "react-icons/fc";
-import { FaGithub as GithubIcon } from "react-icons/fa"
+import { FaGithub as GithubIcon, FaUserSecret as GuestIcon } from "react-icons/fa"
 
 import { Navigate } from "react-router-dom"
 
+const useEmulator = import.meta.env.VITE_USE_EMULATOR === "true";
 
 const Login = () => {
-    const { user, loginWithGithub, loginWithGoogle } = useAuth()
+    const { user, loginWithGithub, loginWithGoogle, loginAsGuest } = useAuth()
 
 
     if (user) {
@@ -27,7 +28,7 @@ const Login = () => {
                 </div>
                 <div className="space-y-4">
                     <button
-                        onClick={loginWithGithub}
+                        onClick={() => void loginWithGithub()}
                         className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-neutral-200/40 rounded-lg hover:bg-gray-50 transition-colors">
                         <GithubIcon
                             className="w-5 h-5"
@@ -35,13 +36,25 @@ const Login = () => {
                         Continue with Github
                     </button>
                     <button
-                        onClick={loginWithGoogle}
+                        onClick={() => void loginWithGoogle()}
                         className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-neutral-200/40 rounded-lg hover:bg-gray-50 transition-colors">
                         <GoogleIcon
                             className="w-5 h-5"
                         />
                         Continue with Google
                     </button>
+
+                    {useEmulator && (
+                        <button
+                            onClick={() => void loginAsGuest()}
+                            data-testid="login-guest"
+                            className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-dashed border-neutral-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-600">
+                            <GuestIcon
+                                className="w-5 h-5"
+                            />
+                            Continue as Guest (emulator)
+                        </button>
+                    )}
 
                 </div>
             </div>

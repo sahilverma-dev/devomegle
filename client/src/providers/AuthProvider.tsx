@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createContext, useState, useEffect, PropsWithChildren } from "react";
 
@@ -9,6 +10,7 @@ import {
     GoogleAuthProvider,
     User,
     onAuthStateChanged,
+    signInAnonymously,
     signInWithPopup,
     signOut,
 } from "firebase/auth";
@@ -18,88 +20,92 @@ import { toast } from "sonner";
 // interfaces
 export interface AuthContextReturnType {
     user: User | null;
-    loginWithGoogle: () => void;
-    loginWithGithub: () => void;
+    loginWithGoogle: () => Promise<void>;
+    loginWithGithub: () => Promise<void>;
+    loginAsGuest: () => Promise<void>;
     logout: () => void;
 }
 
 export const AuthContext = createContext<AuthContextReturnType | null>(null);
 
+const useEmulator = import.meta.env.VITE_USE_EMULATOR === "true";
+
 const AuthProvider = ({ children }: PropsWithChildren) => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
 
+    const persistUser = async (currentUser: User) => {
+        await setDoc(
+            doc(firestore, `users/${currentUser.uid}`),
+            {
+                name: currentUser.displayName,
+                email: currentUser.email,
+                photoURL: currentUser.photoURL,
+                phoneNumber: currentUser.phoneNumber,
+                url: window.location.host,
+                timestamp: serverTimestamp(),
+            },
+            { merge: true }
+        );
+    };
+
     useEffect(() => {
-        onAuthStateChanged(auth, (user) => {
-            try {
-                setLoading(true);
-                setUser(user);
-            } catch (error: any) {
-                console.log(error);
-                toast.error(error?.message || "Failed to login")
-            } finally {
-                setLoading(false);
-            }
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            setLoading(false);
         });
+
+        return unsubscribe;
     }, []);
 
     const loginWithGithub = async () => {
-        // TODO change this
-        // const provider = new GoogleAuthProvider()
-        const provider = new GithubAuthProvider();
-        const { user } = await signInWithPopup(auth, provider);
         try {
-            await setDoc(
-                doc(firestore, `users/${user?.uid}`),
-                {
-                    name: user?.displayName,
-                    email: user?.email,
-                    photoURL: user?.photoURL,
-                    phoneNumber: user?.phoneNumber,
-                    url: window.location.host,
-                    timestamp: serverTimestamp(),
-                },
-                { merge: true }
-            );
+            const provider = new GithubAuthProvider();
+            const { user: currentUser } = await signInWithPopup(auth, provider);
+            await persistUser(currentUser);
         } catch (error: any) {
             console.log(error);
-            toast.error(error?.message || "Failed to login")
+            toast.error(error?.message || "Failed to login");
         }
     };
-    const loginWithGoogle = async () => {
-        // TODO change this
-        const provider = new GoogleAuthProvider()
 
-        const { user } = await signInWithPopup(auth, provider);
+    const loginWithGoogle = async () => {
         try {
-            await setDoc(
-                doc(firestore, `users/${user?.uid}`),
-                {
-                    name: user?.displayName,
-                    email: user?.email,
-                    photoURL: user?.photoURL,
-                    phoneNumber: user?.phoneNumber,
-                    url: window.location.host,
-                    timestamp: serverTimestamp(),
-                },
-                { merge: true }
-            );
+            const provider = new GoogleAuthProvider();
+            const { user: currentUser } = await signInWithPopup(auth, provider);
+            await persistUser(currentUser);
         } catch (error: any) {
             console.log(error);
-            toast.error(error?.message || "Failed to login")
+            toast.error(error?.message || "Failed to login");
+        }
+    };
+
+    // Only used against the Firebase emulator, where OAuth popups are not
+    // available. Keeps the two-tab signaling test self-contained.
+    const loginAsGuest = async () => {
+        try {
+            const { user: currentUser } = await signInAnonymously(auth);
+            await persistUser(currentUser);
+        } catch (error: any) {
+            console.log(error);
+            toast.error(error?.message || "Failed to login as guest");
         }
     };
 
     const logout = () => signOut(auth);
 
     return (
-        <AuthContext.Provider value={{
-            user,
-            loginWithGithub,
-            loginWithGoogle
-            , logout
-        }}>
+        <AuthContext.Provider
+            value={{
+                user,
+                loginWithGithub,
+                loginWithGoogle,
+                loginAsGuest,
+                logout,
+            }}
+        >
             {loading ? <Loader /> : children}
+            {useEmulator && <span className="hidden" data-testid="auth-emulator" />}
         </AuthContext.Provider>
     );
 };
