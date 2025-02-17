@@ -70,3 +70,34 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .glass-panel {
+    @apply backdrop-blur-xl bg-white/5 border border-white/10 shadow-[0_4px_12px_-2px_rgba(0,0,0,0.3)];
+  }
+
+  .button-glow {
+    @apply relative after:absolute after:inset-0 after:bg-primary/30 after:blur-xl after:opacity-0 hover:after:opacity-100 after:transition-opacity;
+  }
+
+  .text-glow {
+    @apply relative after:absolute after:inset-0 after:bg-primary/30 after:blur-md after:opacity-0 hover:after:opacity-100 after:transition-opacity;
+  }
+}
+
+@layer utilities {
+  .animate-in {
+    animation: animate-in 0.3s cubic-bezier(0.2, 0, 0.2, 1);
+  }
+
+  @keyframes animate-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
