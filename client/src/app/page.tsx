@@ -1,9 +1,11 @@
-import Lobby from "@/components/lobby";
+import Interests from "@/components/interests";
+// import Lobby from "@/components/lobby";
 
 const Home = () => {
   return (
     <div>
-      <Lobby />
+      {/* <Lobby /> */}
+      <Interests />
     </div>
   );
 };
