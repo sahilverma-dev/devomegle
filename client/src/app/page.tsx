@@ -1,11 +1,13 @@
-import Interests from "@/components/interests";
+import Matchmaking from "@/components/matchmaking";
+// import Interests from "@/components/interests";
 // import Lobby from "@/components/lobby";
 
 const Home = () => {
   return (
     <div>
       {/* <Lobby /> */}
-      <Interests />
+      {/* <Interests /> */}
+      <Matchmaking />
     </div>
   );
 };
