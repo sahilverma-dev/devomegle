@@ -1,24 +1,49 @@
-export const Background = () => {
-  return (
-    <div className="fixed inset-0 -z-10">
-      <div className="absolute inset-0 bg-background" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,hsl(252,83%,74%,0.15),transparent_70%)]" />
-      <div
-        className="absolute inset-0 opacity-30"
-        style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%239C92AC' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
-        }}
-      />
-    </div>
-  );
-};
+import { Button } from "@/components/ui/button";
+import { GradientButton } from "@/components/ui/gradient-button";
+import Logo from "@/components/ui/logo";
+
+import { Github, Terminal } from "lucide-react";
 
 const LoginPage = () => {
   return (
-    <div>
-      <Background />
-    </div>
+    <>
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md animate-in">
+          <div className="text-center space-y-6">
+            <Logo />
+            <div className="space-y-2">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Welcome to DevOmegle
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Connect with developers who share your interests.
+                <br />
+                Collaborate, learn, and code together.
+              </p>
+            </div>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                  Continue with
+                </span>
+              </div>
+            </div>
+            <Button className="w-full ">
+              <Github className="mr-2 h-4 w-4" />
+              GitHub
+            </Button>
+            <GradientButton>Get Started</GradientButton>
+          </div>
+        </div>
+        <div className="fixed bottom-4 flex items-center text-xs text-muted-foreground gap-1">
+          <Terminal className="w-3 h-3" />
+          <span>Made with code by developers, for developers</span>
+        </div>
+      </div>
+    </>
   );
 };
 
