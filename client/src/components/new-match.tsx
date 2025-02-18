@@ -1,11 +1,9 @@
 import { Code2Icon } from "lucide-react";
+import AnimatedPage from "./animated/animated-page";
 
 const NewMatch = () => {
   return (
-    <section
-      id="transition"
-      className="min-h-screen flex items-center justify-center p-6"
-    >
+    <AnimatedPage className="min-h-screen flex items-center justify-center p-6">
       <div className="max-w-lg w-full flex flex-col items-center text-center gap-6">
         <div className="relative">
           <div className="absolute inset-0 rounded-full animate-ping bg-primary/20" />
@@ -64,7 +62,7 @@ const NewMatch = () => {
           <p className="text-neutral-500 text-sm">Session duration: 15:23</p>
         </div> */}
       </div>
-    </section>
+    </AnimatedPage>
   );
 };
 

@@ -1,16 +1,21 @@
 "use client";
-import { Logo } from "@/components/ui/logo";
 
-const Matchmaking = () => {
+import { Code2Icon } from "lucide-react";
+import AnimatedPage from "./animated/animated-page";
+
+interface Props {
+  onCancel?: () => void;
+}
+
+const Matchmaking: React.FC<Props> = ({ onCancel = () => {} }) => {
   return (
-    <div className="min-h-screen flex flex-col p-4">
+    <AnimatedPage className="min-h-screen flex flex-col p-4">
       <div className="flex-1 flex flex-col items-center justify-center w-full text-center space-y-8">
-        <div className="space-y-6">
+        <div className="flex flex-col items-center text-center gap-6">
           <div className="relative">
-            {/* TODO fix this animation */}
             <div className="absolute inset-0 rounded-full animate-ping bg-primary/20" />
-            <div className="relative rounded-full p-4">
-              <Logo />
+            <div className="relative glass-panel rounded-full h-20 flex items-center justify-center p-4 aspect-square">
+              <Code2Icon className="w-8 h-8 text-primary animate-pulse" />
             </div>
           </div>
           <h2 className="text-2xl font-bold text-white">
@@ -32,7 +37,10 @@ const Matchmaking = () => {
           </span>
         </div>
         <div className="pt-12">
-          <button className="text-neutral-400 hover:text-white transition-colors duration-200 inline-flex items-center">
+          <button
+            onClick={onCancel}
+            className="text-neutral-400 hover:text-white transition-colors duration-200 inline-flex items-center"
+          >
             <svg
               className="w-5 h-5 mr-2"
               fill="none"
@@ -55,7 +63,7 @@ const Matchmaking = () => {
           </p>
         </div>
       </div>
-    </div>
+    </AnimatedPage>
   );
 };
 

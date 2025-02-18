@@ -1,18 +1,17 @@
-import NewMatch from "@/components/new-match";
-// import Chat from "@/components/chat";
-// import Matchmaking from "@/components/matchmaking";
-// import Interests from "@/components/interests";
-// import Lobby from "@/components/lobby";
+import App from "@/components/app";
+import { SocketProvider } from "@/components/providers/socket-provider";
+import { WebRTCProvider } from "@/components/providers/webrtc-provider";
+import { AnimatePresence } from "motion/react";
 
 const Home = () => {
   return (
-    <>
-      {/* <Lobby /> */}
-      {/* <Interests /> */}
-      {/* <Matchmaking /> */}
-      {/* <Chat /> */}
-      <NewMatch />
-    </>
+    <SocketProvider>
+      <WebRTCProvider>
+        <AnimatePresence>
+          <App />
+        </AnimatePresence>
+      </WebRTCProvider>
+    </SocketProvider>
   );
 };
 
