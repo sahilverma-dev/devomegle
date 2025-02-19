@@ -8,23 +8,16 @@ import Chat from "./chat";
 import NewMatch from "./new-match";
 import Loader from "./loader";
 import { useSocket } from "./providers/socket-provider";
-
-export type AppStatus =
-  | "loading"
-  | "lobby"
-  | "interests"
-  | "matchmaking"
-  | "matched"
-  | "new-matchmaking";
+import { useWebRTC } from "./providers/webrtc-provider";
 
 const App = () => {
-  const [status, setStatus] = useState<AppStatus>("loading");
+  const { status, changeStatus } = useWebRTC();
 
   const { isConnected } = useSocket();
 
   useEffect(() => {
     if (isConnected) {
-      setStatus("matched");
+      changeStatus("matched");
     }
   }, [isConnected]);
 
@@ -37,14 +30,14 @@ const App = () => {
       return (
         <Lobby
           onTextChatStart={() => {
-            setStatus("matchmaking");
+            changeStatus("matchmaking");
           }}
           onVideoChatStart={() => {
-            setStatus("matched");
-            // setStatus("matchmaking");
+            changeStatus("matched");
+            // changeStatus("matchmaking");
           }}
           onChangeInterest={() => {
-            setStatus("interests");
+            changeStatus("interests");
           }}
         />
       );
@@ -56,19 +49,13 @@ const App = () => {
       return (
         <Matchmaking
           onCancel={() => {
-            setStatus("lobby");
+            changeStatus("lobby");
           }}
         />
       );
     }
     case "matched": {
-      return (
-        <Chat
-          onFindNextMatch={() => {
-            setStatus("new-matchmaking");
-          }}
-        />
-      );
+      return <Chat />;
     }
     case "new-matchmaking": {
       return <NewMatch />;

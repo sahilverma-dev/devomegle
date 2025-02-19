@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
-import { GradientButton } from "@/components/ui/gradient-button";
+import { FaGithub as GitHubIcon } from "react-icons/fa";
+
 import Logo from "@/components/ui/logo";
 
-import { Github, Terminal } from "lucide-react";
+import { Terminal } from "lucide-react";
 
 const LoginPage = () => {
   return (
@@ -31,11 +32,17 @@ const LoginPage = () => {
                 </span>
               </div>
             </div>
-            <Button className="w-full ">
-              <Github className="mr-2 h-4 w-4" />
-              GitHub
+
+            <Button className="bg-[#333333] text-white after:flex-1 hover:bg-[#333333]/90">
+              <span className="pointer-events-none me-2 flex-1">
+                <GitHubIcon
+                  className="opacity-60"
+                  size={16}
+                  aria-hidden="true"
+                />
+              </span>
+              Login with GitHub
             </Button>
-            <GradientButton>Get Started</GradientButton>
           </div>
         </div>
         <div className="fixed bottom-4 flex items-center text-xs text-muted-foreground gap-1">
