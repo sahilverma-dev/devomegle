@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import Lobby from "./lobby";
 import Interests from "./interests";
 import Matchmaking from "./matchmaking";
@@ -17,7 +17,7 @@ const App = () => {
 
   useEffect(() => {
     if (isConnected) {
-      changeStatus("matched");
+      changeStatus("lobby");
     }
   }, [isConnected]);
 

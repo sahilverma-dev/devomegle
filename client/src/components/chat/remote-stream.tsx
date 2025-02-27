@@ -10,7 +10,7 @@ const RemoteSteam = () => {
     <AnimationContainer
       direction="right"
       customDelay={0.1}
-      className="relative flex-1 glass-panel rounded-lg overflow-hidden"
+      className="relative aspect-square flex-1 glass-panel rounded-lg overflow-hidden"
     >
       {/* <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" /> */}
       <video

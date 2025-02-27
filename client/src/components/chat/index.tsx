@@ -19,7 +19,7 @@ const ChatScreen = () => {
         <div
           className={cn(
             "flex gap-4 items-center",
-            isSideChatActive ? "flex-col" : "flex-row  w-full"
+            isSideChatActive ? "flex-col flex-grow" : "flex-row  w-full"
           )}
         >
           <LocalSteam />

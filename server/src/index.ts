@@ -45,7 +45,7 @@ io.on("connection", (socket) => {
   // Handle WebRTC signaling
   socket.on("offer", ({ offer, roomId, userBy, userTo }) => {
     console.log(
-      `got offer from ${userBy.name} to ${userTo.name} and room ${roomId}`
+      `got offer from ${userBy?.name} to ${userTo?.name} and room ${roomId}`
     );
     socket.to(roomId).emit("offer", { offer, userBy });
   });

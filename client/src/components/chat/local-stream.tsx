@@ -19,7 +19,7 @@ const LocalSteam = () => {
     <AnimationContainer
       direction="left"
       customDelay={0.1}
-      className="relative flex-1 glass-panel rounded-lg overflow-hidden"
+      className="relative aspect-square flex-1 glass-panel rounded-lg overflow-hidden"
     >
       <AnimatePresence>
         {isLocalStreamLoading ? (

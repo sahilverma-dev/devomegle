@@ -405,14 +405,14 @@ export const WebRTCProvider = (props: PropsWithChildren) => {
 
     peerConnection.onnegotiationneeded = async () => {
       console.log("Negotiation needed");
-      const offer = await createOffer();
+      // const offer = await createOffer();
 
-      socket?.emit("offer", {
-        offer,
-        userTo: remoteUser,
-        userBy: user,
-        roomId,
-      });
+      // socket?.emit("offer", {
+      //   offer,
+      //   userTo: remoteUser,
+      //   userBy: user,
+      //   roomId,
+      // });
     };
 
     peerConnection.onicecandidate = (event) => {

@@ -152,7 +152,7 @@
 
 const SideChat = () => {
   return (
-    <div className="h-full flex-grow w-full border rounded-lg relative glass-panel">
+    <div className="h-full max-w-[500px] w-full border rounded-lg relative glass-panel">
       SideChat
     </div>
   );
