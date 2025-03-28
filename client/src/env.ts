@@ -1,28 +1,36 @@
 import { z } from "zod";
 
+// Define the schema for environment variables
 const EnvSchema = z.object({
   NODE_ENV: z.string().default("development"),
-  PORT: z.coerce.number().default(4000),
-  LOG_LEVEL: z.enum([
-    "fatal",
-    "error",
-    "warn",
-    "info",
-    "debug",
-    "trace",
-    "silent",
-  ]),
+
+  // Better auth
+  BETTER_AUTH_URL: z.string().url(),
+  BETTER_AUTH_SECRET: z.string(),
+
+  // Drizzle
   DB_FILE_NAME: z.string(),
+
+  // GitHub OAuth
+  GITHUB_CLIENT_ID: z.string(),
+  GITHUB_CLIENT_SECRET: z.string(),
 });
 
-export type env = z.infer<typeof EnvSchema>;
+// Infer the TypeScript type from the schema
+export type Env = z.infer<typeof EnvSchema>;
 
-const { data: env, error } = EnvSchema.safeParse(process.env);
+// Parse and validate the environment variables
+const result = EnvSchema.safeParse(process.env);
 
-if (error) {
-  console.error("❌ Invalid env:");
-  console.error(JSON.stringify(error.flatten().fieldErrors, null, 2));
+if (!result.success) {
+  console.error("❌ Invalid environment variables detected:");
+  console.error(JSON.stringify(result.error.flatten().fieldErrors, null, 2));
+  console.error("Please check your .env file or environment configuration.");
   process.exit(1);
 }
 
-export default env!;
+const env = result.data;
+console.log("✅ Environment variables successfully validated.");
+console.log(`Running in ${env.NODE_ENV} mode.`);
+
+export default env;
