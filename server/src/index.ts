@@ -4,6 +4,8 @@ import { Server } from "socket.io";
 
 import { createServer } from "http";
 import type { User } from "./interfaces";
+import { redis } from "./redis";
+import { handelSocketConnection } from "./routes/socket-route";
 
 const app = express();
 const server = createServer(app);
@@ -27,24 +29,22 @@ app.get("/", (req, res) => {
   res.send("<h1>Hello world</h1>");
 });
 
+// io.use((socket, next) => {
+//   const username = socket.handshake.auth.username;
+//   if (!username) {
+//     return next(new Error("invalid username"));
+//   }
+//   socket.username = username;
+//   next();
+// })
+
+redis
+  .connect()
+  .then(() => console.log("Redis database connected"))
+  .catch((err) => console.log("Redis Error:", err));
+
 io.on("connection", (socket) => {
-  console.log("a user connected", socket.id);
-
-  //   handle user join
-  socket.on("join", (user: User) => {
-    const socketUser: SocketUser = {
-      ...user,
-      socketId: socket.id,
-    };
-
-    waitingQueue.push(socketUser);
-
-    console.log(`${user.name} joined the queue`);
-  });
-
-  io.on("disconnect", () => {
-    console.log("user left");
-  });
+  handelSocketConnection(io, socket);
 });
 
 server.listen(PORT, () => {

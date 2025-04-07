@@ -1,35 +1,46 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { useSession } from "@/lib/auth-client";
-import { useEffect } from "react";
 
+import { useEffect } from "react";
+import { faker } from "@faker-js/faker";
 import { io } from "socket.io-client";
 
 const socket = io("http://localhost:4000");
 
-const TextChatPage = () => {
-  const { data } = useSession();
+const user = {
+  id: crypto.randomUUID(),
+  name: faker.person.fullName(),
+};
 
-  const handleJoin = () => {
-    if (data?.user) {
-      socket.emit("join", data?.user);
-    }
+const TextChatPage = () => {
+  const joinUser = () => {
+    socket.emit("join", user);
+  };
+
+  // listers
+  const handleJoin = (user: any) => {
+    console.log(user);
   };
 
   useEffect(() => {
     socket.connect();
 
+    socket.on("join", handleJoin);
+
     return () => {
       socket.disconnect();
+      socket.off("join", handleJoin);
     };
   }, []);
 
   return (
     <div>
-      {data?.user.name}
+      {user.name}
 
-      <Button onClick={handleJoin}>join</Button>
+      <Button onClick={joinUser} className="cursor-pointer">
+        join
+      </Button>
     </div>
   );
 };

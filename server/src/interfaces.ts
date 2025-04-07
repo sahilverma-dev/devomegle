@@ -7,3 +7,7 @@ export interface User {
   updatedAt: Date;
   image?: string | null | undefined | undefined;
 }
+
+export interface SocketUser extends User {
+  socketId: string;
+}
