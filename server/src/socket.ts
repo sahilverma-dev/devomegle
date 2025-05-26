@@ -18,10 +18,16 @@ export async function setupSocketIO(io: Server) {
     const count = await pubClient.get(ONLINE_COUNT_KEY);
     io.emit("user-count", Number(count));
 
+    socket.on("user-left", async () => {
+      const count = Math.max(0, Number(await pubClient.decr(ONLINE_COUNT_KEY)));
+      await pubClient.set(ONLINE_COUNT_KEY, count);
+      io.emit("user-count", count);
+    });
+
     socket.on("disconnect", async () => {
-      await pubClient.decr(ONLINE_COUNT_KEY);
-      const count = await pubClient.get(ONLINE_COUNT_KEY);
-      io.emit("user-count", Number(count));
+      const count = Math.max(0, Number(await pubClient.decr(ONLINE_COUNT_KEY)));
+      await pubClient.set(ONLINE_COUNT_KEY, count); // sanitize
+      io.emit("user-count", count);
     });
   });
 }
