@@ -1,42 +1,38 @@
 {
   "name": "client",
-  "version": "0.1.0",
   "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@radix-ui/react-slot": "^1.1.2",
-    "better-auth": "^1.2.5",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@tailwindcss/vite": "^4.1.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "dotenv": "^16.4.7",
-    "drizzle-orm": "^0.41.0",
-    "lucide-react": "^0.487.0",
-    "next": "15.2.4",
-    "postgres": "^3.4.5",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "socket.io-client": "^4.8.1",
-    "sonner": "^2.0.3",
-    "tailwind-merge": "^3.1.0",
-    "tw-animate-css": "^1.2.5"
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwind-merge": "^3.3.0",
+    "tailwindcss": "^4.1.7"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "@faker-js/faker": "^9.6.0",
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "drizzle-kit": "^0.30.6",
-    "eslint": "^9",
-    "eslint-config-next": "15.2.4",
-    "tailwindcss": "^4",
-    "tsx": "^4.19.3",
-    "typescript": "^5"
+    "@eslint/js": "^9.25.0",
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "globals": "^16.0.0",
+    "tw-animate-css": "^1.3.0",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.30.1",
+    "vite": "^6.3.5"
   }
 }
