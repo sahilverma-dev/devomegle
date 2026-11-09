@@ -1,38 +1,21 @@
 import Chat from "@/components/chat";
 import Lobby from "@/components/lobby";
-import { Background } from "@/components/ui/background";
-import { Logo } from "@/components/ui/logo";
 import { useAuth } from "@/hooks";
 import { useMatchmaking } from "@/hooks/useMatchMaking";
-import { Radio } from "lucide-react";
 
 const Searching = () => (
-  <>
-    <Background />
-    <div className="flex min-h-screen flex-col items-center justify-center gap-8 px-6 text-center">
-      <Logo />
-      <div className="relative flex h-24 w-24 items-center justify-center">
-        <span className="absolute inset-0 rounded-full border border-primary/30" />
-        <span className="absolute inset-0 animate-pulse-ring rounded-full border border-primary/40" />
-        <span className="absolute inset-3 rounded-full border border-primary/20" />
-        <span className="relative flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] backdrop-blur-xl">
-          <Radio className="h-6 w-6 animate-pulse text-primary" />
-        </span>
-      </div>
-      <div className="animate-fade-up">
-        <h2 className="text-xl font-semibold tracking-tight">
-          Finding a developer for you...
-        </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Scanning the network for an open room.
-        </p>
-      </div>
-      <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
-        firestore://rooms --waiting
+  <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
+    <div className="relative">
+      <div className="absolute inset-0 animate-ping rounded-full bg-blue-500/30" />
+      <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
       </div>
     </div>
-  </>
+    <h2 className="text-lg font-semibold">Finding a developer for you...</h2>
+    <p className="text-sm text-neutral-400">
+      Looking for an open room on Firestore.
+    </p>
+  </div>
 );
 
 const Home = () => {
