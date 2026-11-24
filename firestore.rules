@@ -16,29 +16,95 @@ service cloud.firestore {
         && room.joinedBy.uid == request.auth.uid;
     }
 
+    function isParticipant(room) {
+      return isCreator(room) || isJoiner(room);
+    }
+
+    // True when the write touches nothing outside `allowed`.
+    function changedOnly(allowed) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+    }
+
+    // The room is being handed back to the matching pool.
+    function resetsToWaiting() {
+      return request.resource.data.status == 'waiting'
+        && request.resource.data.joinedBy == null;
+    }
+
     match /users/{userId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
     }
 
     match /rooms/{roomId} {
-      allow read: if signedIn();
+      // Waiting rooms are discoverable so a stranger can claim them; anything
+      // else is visible to its two participants only. A deleted room must stay
+      // readable so listeners get a clean "document is gone" snapshot instead
+      // of a permission error.
+      allow read: if signedIn()
+        && (
+          resource == null
+          || resource.data.status == 'waiting'
+          || isParticipant(resource.data)
+        );
 
       allow create: if signedIn()
         && request.resource.data.status == 'waiting'
+        && request.resource.data.mode in ['video', 'text']
         && request.resource.data.createdBy.uid == request.auth.uid
-        && request.resource.data.joinedBy == null;
+        && request.resource.data.joinedBy == null
+        && request.resource.data.pairId == null
+        && request.resource.data.offer == null
+        && request.resource.data.answer == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.creatorLastSeen == request.time;
 
-      // The creator and joiner can update signaling/heartbeat fields, and any
-      // signed-in user may atomically claim a room that is still waiting.
       allow update: if signedIn()
         && (
-          isCreator(resource.data)
-          || isJoiner(resource.data)
+          // The creator publishes the offer and heartbeats.
+          (
+            isCreator(resource.data)
+            && changedOnly([
+              'offer', 'status', 'creatorLastSeen', 'updatedAt'
+            ])
+          )
+          // ...or hands the room back to the pool after a stranger left.
+          || (
+            isCreator(resource.data)
+            && resetsToWaiting()
+            && changedOnly([
+              'status', 'pairId', 'joinedBy', 'offer', 'answer',
+              'joinerLastSeen', 'creatorLastSeen', 'updatedAt'
+            ])
+          )
+          // The joiner publishes the answer and heartbeats.
+          || (
+            isJoiner(resource.data)
+            && changedOnly(['answer', 'joinerLastSeen', 'updatedAt'])
+          )
+          // ...or hands the room back to the pool when it leaves.
+          || (
+            isJoiner(resource.data)
+            && resetsToWaiting()
+            && changedOnly([
+              'status', 'pairId', 'joinedBy', 'offer', 'answer',
+              'joinerLastSeen', 'updatedAt'
+            ])
+          )
+          // Any signed-in stranger may claim a waiting room, which starts a
+          // brand new pairing and drops any signaling from the previous one.
           || (
             resource.data.status == 'waiting'
             && resource.data.joinedBy == null
             && request.resource.data.joinedBy != null
             && request.resource.data.joinedBy.uid == request.auth.uid
+            && request.resource.data.status == 'connecting'
+            && request.resource.data.pairId != null
+            && request.resource.data.offer == null
+            && request.resource.data.answer == null
+            && changedOnly([
+              'joinedBy', 'joinerLastSeen', 'pairId', 'offer', 'answer',
+              'status', 'updatedAt'
+            ])
           )
         );
 
@@ -46,13 +112,25 @@ service cloud.firestore {
       // has been abandoned for two minutes so crashed tabs cannot linger.
       allow delete: if signedIn()
         && (
-          isCreator(resource.data)
-          || isJoiner(resource.data)
+          isParticipant(resource.data)
           || resource.data.updatedAt < request.time - duration.value(2, 'm')
         );
 
       match /candidates/{candidateId} {
-        allow read, create, delete: if signedIn();
+        function room() {
+          return get(/databases/$(database)/documents/rooms/$(roomId));
+        }
+
+        // ICE candidates reveal IP addresses, so only the two peers in the room
+        // may read them, and a peer may only publish candidates as itself.
+        allow read: if signedIn() && room() != null && isParticipant(room().data);
+
+        allow create: if signedIn()
+          && room() != null
+          && isParticipant(room().data)
+          && request.resource.data.from == request.auth.uid;
+
+        allow delete: if signedIn() && room() != null && isParticipant(room().data);
       }
     }
   }
