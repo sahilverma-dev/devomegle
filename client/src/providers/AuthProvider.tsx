@@ -15,6 +15,7 @@ import {
     signOut,
 } from "firebase/auth";
 import Loader from "@/components/loader";
+import { env } from "@/lib/env";
 import { toast } from "sonner";
 
 // interfaces
@@ -27,8 +28,6 @@ export interface AuthContextReturnType {
 }
 
 export const AuthContext = createContext<AuthContextReturnType | null>(null);
-
-const useEmulator = import.meta.env.VITE_USE_EMULATOR === "true";
 
 const AuthProvider = ({ children }: PropsWithChildren) => {
     const [user, setUser] = useState<User | null>(null);
@@ -105,7 +104,7 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
             }}
         >
             {loading ? <Loader /> : children}
-            {useEmulator && <span className="hidden" data-testid="auth-emulator" />}
+            {env.useEmulator && <span className="hidden" data-testid="auth-emulator" />}
         </AuthContext.Provider>
     );
 };

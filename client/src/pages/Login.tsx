@@ -3,8 +3,7 @@ import { FcGoogle as GoogleIcon } from "react-icons/fc";
 import { FaGithub as GithubIcon, FaUserSecret as GuestIcon } from "react-icons/fa"
 
 import { Navigate } from "react-router-dom"
-
-const useEmulator = import.meta.env.VITE_USE_EMULATOR === "true";
+import { env } from "@/lib/env";
 
 const Login = () => {
     const { user, loginWithGithub, loginWithGoogle, loginAsGuest } = useAuth()
@@ -44,7 +43,7 @@ const Login = () => {
                         Continue with Google
                     </button>
 
-                    {useEmulator && (
+                    {env.useEmulator && (
                         <button
                             onClick={() => void loginAsGuest()}
                             data-testid="login-guest"
