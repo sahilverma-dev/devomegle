@@ -36,11 +36,53 @@ const roomCount = async (request: APIRequestContext) => {
   return payload.documents?.length ?? 0;
 };
 
-const openUser = async (browser: Browser): Promise<TestUser> => {
+/**
+ * Wraps getUserMedia so the test can count camera tracks that were acquired but
+ * never stopped, which is what "the camera light stays on" means in practice.
+ */
+const trackCounterScript = () => {
+  const target = window as unknown as { __liveVideoTracks?: number };
+  target.__liveVideoTracks = 0;
+
+  const original = navigator.mediaDevices.getUserMedia.bind(
+    navigator.mediaDevices
+  );
+
+  navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const stream = await original(constraints);
+
+    stream.getVideoTracks().forEach((track) => {
+      target.__liveVideoTracks = (target.__liveVideoTracks ?? 0) + 1;
+
+      const stop = track.stop.bind(track);
+      track.stop = () => {
+        target.__liveVideoTracks = (target.__liveVideoTracks ?? 1) - 1;
+        stop();
+      };
+    });
+
+    return stream;
+  };
+};
+
+const liveVideoTracks = (page: Page) =>
+  page.evaluate(() => {
+    const target = window as unknown as { __liveVideoTracks?: number };
+    return target.__liveVideoTracks ?? -1;
+  });
+
+const openUser = async (
+  browser: Browser,
+  options: { trackCounter?: boolean } = {}
+): Promise<TestUser> => {
   const context = await browser.newContext({
     permissions: ["camera", "microphone"],
   });
   const page = await context.newPage();
+
+  if (options.trackCounter) {
+    await page.addInitScript(trackCounterScript);
+  }
 
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -245,6 +287,38 @@ test.describe("firestore signaling", () => {
     } finally {
       await first.context.close();
       await second.context.close();
+    }
+  });
+
+  test("a failed connection releases the camera", async ({ browser, request }) => {
+    test.setTimeout(150_000);
+    await clearRooms(request);
+
+    const creator = await openUser(browser, { trackCounter: true });
+    const joiner = await openUser(browser, { trackCounter: true });
+
+    try {
+      await startVideo(creator.page);
+      await startVideo(joiner.page);
+
+      await expect
+        .poll(() => remoteVideoWidth(joiner.page), { timeout: 60_000 })
+        .toBeGreaterThan(0);
+
+      await expect.poll(() => liveVideoTracks(joiner.page)).toBe(1);
+
+      // The stranger disappears without a graceful teardown.
+      await creator.context.close();
+
+      // The joiner lands back in the lobby...
+      await expect(joiner.page.getByText("Start Chatting")).toBeVisible({
+        timeout: 90_000,
+      });
+
+      // ...and must not leave the camera running there.
+      await expect.poll(() => liveVideoTracks(joiner.page)).toBe(0);
+    } finally {
+      await joiner.context.close();
     }
   });
 

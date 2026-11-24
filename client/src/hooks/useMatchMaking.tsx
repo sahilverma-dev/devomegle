@@ -373,7 +373,7 @@ export const useMatchmaking = (authUser: User | null) => {
       }
 
       toast.error("Stranger disconnected");
-      await teardown({ status: "lobby", stopMedia: false });
+      await teardown({ status: "lobby", stopMedia: true });
     },
     [returnCreatorToWaiting, teardown]
   );
@@ -410,7 +410,7 @@ export const useMatchmaking = (authUser: User | null) => {
 
       if (signalAttemptsRef.current > SIGNAL_MAX_ATTEMPTS) {
         toast.error("Could not reach your match. Please try again.");
-        void teardown({ status: "lobby", stopMedia: false });
+        void teardown({ status: "lobby", stopMedia: true });
         return;
       }
 
@@ -555,7 +555,7 @@ export const useMatchmaking = (authUser: User | null) => {
 
           // The document is already gone, so there is nothing left to clean up.
           toast.info("The stranger closed the room");
-          void teardown({ status: "lobby", removeRoom: "none" });
+          void teardown({ status: "lobby", removeRoom: "none", stopMedia: true });
         },
         (error) => console.error("Room listener failed", error)
       );
@@ -767,6 +767,7 @@ export const useMatchmaking = (authUser: User | null) => {
         } catch (error) {
           console.error("Media access failed", error);
           toast.error("Camera and microphone access is required for video chat");
+          webrtcRef.current.stopMedia();
           if (alive()) updateStatus("lobby");
           return;
         }
@@ -800,7 +801,7 @@ export const useMatchmaking = (authUser: User | null) => {
       } catch (error) {
         console.error("Matchmaking failed", error);
         toast.error("Could not find a stranger. Please try again.");
-        await teardown({ status: "lobby" });
+        await teardown({ status: "lobby", stopMedia: true });
       } finally {
         startInFlightRef.current = false;
       }
