@@ -42,6 +42,9 @@ rooms/{roomId}/candidates/{candidateId}
    search guarantee that closed tabs cannot leave phantom users behind.
 7. Firestore does not cascade-delete subcollections, so room cleanup explicitly
    removes the candidate documents as well.
+8. When a direct path between two peers is impossible, media falls back to a
+   TURN relay. The Cloudflare TURN key never reaches the browser: `api/turn.js`
+   mints short-lived credentials for it.
 
 WebRTC media and the in-call text channel never touch Firestore: the text chat
 rides on an `RTCDataChannel`.
@@ -64,6 +67,25 @@ bun install
 cp .env.example .env   # fill in the Firebase web app values
 bun run dev
 ```
+
+The client validates its environment at startup (`src/lib/env.ts`): a missing
+Firebase value stops the app with a clear message instead of booting a client
+that cannot reach Firestore. With `VITE_USE_EMULATOR=true` the Firebase values
+may stay empty, because the demo project defaults are filled in.
+
+### TURN relay
+
+`client/api/turn.js` exchanges the Cloudflare TURN key for short-lived
+credentials. Set these in the host environment (for example the Vercel project
+settings) and never behind a `VITE_` prefix:
+
+```
+CLOUDFLARE_TURN_KEY_ID=...
+CLOUDFLARE_TURN_API_TOKEN=...
+```
+
+Without them the endpoint answers `503` and the app quietly uses STUN only,
+which is what happens in local development because Vite does not serve `api/`.
 
 ### Firebase emulator
 

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { STUN_ONLY_ICE_SERVERS, loadIceServers } from "@/lib/turn";
 
 export type MediaMode = "video" | "text";
 
@@ -53,17 +54,6 @@ interface WebRTCContextValue {
 
 export const WebRTCContext = createContext<WebRTCContextValue | null>(null);
 
-const rtcConfiguration: RTCConfiguration = {
-  iceServers: [
-    {
-      urls: [
-        "stun:stun.l.google.com:19302",
-        "stun:global.stun.twilio.com:3478",
-      ],
-    },
-  ],
-};
-
 const stopStream = (stream: MediaStream | null) => {
   stream?.getTracks().forEach((track) => {
     track.enabled = false;
@@ -73,6 +63,12 @@ const stopStream = (stream: MediaStream | null) => {
 
 export const WebRTCProvider = ({ children }: PropsWithChildren) => {
   const peerRef = useRef<RTCPeerConnection | null>(null);
+  /**
+   * STUN alone cannot connect two peers behind symmetric NAT, so TURN
+   * credentials are resolved before the first peer connection is built and
+   * refreshed on every match attempt.
+   */
+  const iceServersRef = useRef<RTCIceServer[]>(STUN_ONLY_ICE_SERVERS);
   const localStreamRef = useRef<MediaStream | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
@@ -156,11 +152,18 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
   );
 
   const prepareMedia = useCallback(async (nextMode: MediaMode) => {
+    // Resolve TURN credentials while the camera prompt is on screen.
+    const iceServersPromise = loadIceServers().then((iceServers) => {
+      iceServersRef.current = iceServers;
+      return iceServers;
+    });
+
     if (nextMode === "text") {
       stopStream(localStreamRef.current);
       localStreamRef.current = null;
       setLocalStream(null);
       setMode("text");
+      await iceServersPromise;
       return null;
     }
 
@@ -171,6 +174,7 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
     if (current && hasLiveTracks) {
       setMode("video");
       setLocalStream(current);
+      await iceServersPromise;
       return current;
     }
 
@@ -188,6 +192,8 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
     setIsLocalVideoActive(videoActiveRef.current);
     setLocalStream(stream);
     setMode("video");
+
+    await iceServersPromise;
 
     return stream;
   }, []);
@@ -269,7 +275,9 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
     (offerer: boolean) => {
       resetPeerConnection();
 
-      const peer = new RTCPeerConnection(rtcConfiguration);
+      const peer = new RTCPeerConnection({
+        iceServers: iceServersRef.current,
+      });
       peerRef.current = peer;
 
       const stream = localStreamRef.current;
@@ -420,6 +428,14 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
     if (channel?.readyState === "open") {
       channel.send(JSON.stringify({ type: "chat", id, text: trimmed }));
     }
+  }, []);
+
+  // Warm the TURN credentials as soon as the app loads so the first match does
+  // not wait for them.
+  useEffect(() => {
+    void loadIceServers().then((iceServers) => {
+      iceServersRef.current = iceServers;
+    });
   }, []);
 
   useEffect(
