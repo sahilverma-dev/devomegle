@@ -7,6 +7,7 @@ import {
   getDocs,
   limit,
   onSnapshot,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
@@ -25,18 +26,28 @@ export const CANDIDATES_COLLECTION = "candidates";
 
 /** How often each peer refreshes its presence in the room document. */
 export const HEARTBEAT_INTERVAL_MS = 5_000;
-/** A peer is considered gone after missing this many heartbeats. */
-export const STALE_AFTER_MS = 20_000;
+/**
+ * A peer is considered gone once its last-seen timestamp has not advanced for
+ * this long. The check measures *progress*, not wall-clock distance, so a
+ * client with a skewed clock cannot produce false disconnects. The window has
+ * to survive background-tab timer throttling, which can stretch the 5s
+ * heartbeat to a full minute.
+ */
+export const STALE_AFTER_MS = 45_000;
 /** Rooms nobody has touched for this long are swept away. */
 export const ROOM_TTL_MS = 2 * 60_000;
+/** How often a fresh creator looks for a stranger who was already waiting. */
+export const MATCH_POLL_INTERVAL_MS = 1_200;
+/** How long a fresh creator keeps looking before settling into the pool. */
+export const MATCH_POLL_WINDOW_MS = 8_000;
 
-export type RoomStatus = "waiting" | "connecting" | "connected";
+export type RoomStatus = "waiting" | "connecting";
 export type Role = "creator" | "joiner";
+export type RoomMode = "video" | "text";
 
 export interface SignalUser {
   uid: string;
   displayName: string | null;
-  email: string | null;
   photoURL: string | null;
 }
 
@@ -45,12 +56,23 @@ export interface SignalDescription {
   sdp: string;
 }
 
+/**
+ * A description tagged with the pairing it belongs to. A joiner writes a fresh
+ * `pairId` when it claims a room, so a leftover offer/answer from a previous
+ * stranger can never be applied to the new pairing.
+ */
+export interface TaggedSignal extends SignalDescription {
+  pairId: string;
+}
+
 export interface RoomDoc {
   status: RoomStatus;
+  mode: RoomMode;
+  pairId: string | null;
   createdBy: SignalUser;
   joinedBy: SignalUser | null;
-  offer: SignalDescription | null;
-  answer: SignalDescription | null;
+  offer: TaggedSignal | null;
+  answer: TaggedSignal | null;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
   creatorLastSeen: Timestamp | null;
@@ -65,10 +87,15 @@ export interface CandidateDoc {
   createdAt: Timestamp | null;
 }
 
+export interface ClaimResult {
+  roomId: string;
+  pairId: string;
+  room: RoomWithId;
+}
+
 export const toSignalUser = (user: User): SignalUser => ({
   uid: user.uid,
   displayName: user.displayName,
-  email: user.email,
   photoURL: user.photoURL,
 });
 
@@ -80,6 +107,17 @@ export const roomCandidatesRef = (roomId: string) =>
 
 const asRoom = (id: string, data: DocumentData): RoomWithId =>
   ({ id, ...(data as RoomDoc) }) as RoomWithId;
+
+/**
+ * Room ids sort in creation order. Two strangers that start searching at the
+ * same time both end up holding a room, so they need a deterministic rule for
+ * who joins whom: the owner of the newer id always claims the older room. Both
+ * sides compare the same two immutable strings, so they can never both claim.
+ */
+const nextRoomId = () =>
+  `${Date.now().toString(36).padStart(10, "0")}-${crypto
+    .randomUUID()
+    .slice(0, 8)}`;
 
 const isFreshRoom = (room: RoomWithId, now = Date.now()) => {
   const created = room.createdAt?.toMillis() ?? 0;
@@ -94,11 +132,16 @@ const isFreshRoom = (room: RoomWithId, now = Date.now()) => {
 /**
  * Creates an open room owned by `user`. Only one offerer (creator) per room.
  */
-export const createRoom = async (user: User): Promise<string> => {
-  const ref = doc(collection(firestore, ROOMS_COLLECTION));
+export const createRoom = async (
+  user: User,
+  mode: RoomMode
+): Promise<string> => {
+  const roomId = nextRoomId();
 
-  await setDoc(ref, {
+  await setDoc(roomDocRef(roomId), {
     status: "waiting",
+    mode,
+    pairId: null,
     createdBy: toSignalUser(user),
     joinedBy: null,
     offer: null,
@@ -109,18 +152,26 @@ export const createRoom = async (user: User): Promise<string> => {
     joinerLastSeen: null,
   });
 
-  return ref.id;
+  return roomId;
 };
 
 /**
- * Returns open rooms created by somebody else, newest first is not required.
- * Rooms whose owner stopped sending heartbeats are ignored.
+ * Returns open rooms for the given mode, freshest heartbeat first, excluding
+ * rooms owned by the caller. Freshness is filtered by the server so a backlog
+ * of abandoned rooms can never crowd real matches out of the result window.
  */
-export const findWaitingRooms = async (user: User): Promise<RoomWithId[]> => {
+export const findWaitingRooms = async (
+  user: User,
+  mode: RoomMode
+): Promise<RoomWithId[]> => {
+  const cutoff = Timestamp.fromMillis(Date.now() - STALE_AFTER_MS);
   const snapshot = await getDocs(
     query(
       collection(firestore, ROOMS_COLLECTION),
       where("status", "==", "waiting"),
+      where("mode", "==", mode),
+      where("creatorLastSeen", ">", cutoff),
+      orderBy("creatorLastSeen", "desc"),
       limit(50)
     )
   );
@@ -128,24 +179,29 @@ export const findWaitingRooms = async (user: User): Promise<RoomWithId[]> => {
   const now = Date.now();
   return snapshot.docs
     .map((item) => asRoom(item.id, item.data()))
-    .filter((room) => room.createdBy.uid !== user.uid && isFreshRoom(room, now));
+    .filter((room) => room.createdBy.uid !== user.uid && isFreshRoom(room, now))
+    .sort((left, right) => (left.id < right.id ? -1 : 1));
 };
 
 /**
- * Atomically claims an open room. The transaction makes sure two strangers
- * can never end up in the same room at once.
+ * Atomically claims an open room. The transaction makes sure two strangers can
+ * never end up in the same room at once, and it starts a brand new pairing by
+ * writing a fresh `pairId` and dropping any signaling left from a previous
+ * stranger.
  */
 export const claimRoom = async (
   roomId: string,
-  user: User
-): Promise<boolean> => {
+  user: User,
+  mode: RoomMode
+): Promise<ClaimResult | null> => {
   const ref = roomDocRef(roomId);
+  const pairId = crypto.randomUUID();
 
   try {
-    return await runTransaction(firestore, async (transaction) => {
+    const claimed = await runTransaction(firestore, async (transaction) => {
       const snapshot = await transaction.get(ref);
 
-      if (!snapshot.exists()) return false;
+      if (!snapshot.exists()) return null;
 
       const room = asRoom(snapshot.id, snapshot.data());
       const now = Date.now();
@@ -154,35 +210,60 @@ export const claimRoom = async (
 
       if (
         room.status !== "waiting" ||
+        room.mode !== mode ||
         room.joinedBy !== null ||
         now - created >= ROOM_TTL_MS ||
         now - lastSeen >= STALE_AFTER_MS
       ) {
-        return false;
+        return null;
       }
 
       transaction.update(ref, {
         joinedBy: toSignalUser(user),
         joinerLastSeen: serverTimestamp(),
+        pairId,
+        offer: null,
+        answer: null,
         status: "connecting",
         updatedAt: serverTimestamp(),
       });
 
-      return true;
+      // The post-claim document is known exactly, so there is no need to read
+      // it back before the realtime listener delivers it.
+      return {
+        ...room,
+        joinedBy: toSignalUser(user),
+        pairId,
+        offer: null,
+        answer: null,
+        status: "connecting" as const,
+      };
     });
-  } catch {
-    // Lost the race or a rule rejected the claim: just try the next room.
-    return false;
+
+    return claimed ? { roomId, pairId, room: claimed } : null;
+  } catch (error) {
+    // A permission or network failure looks the same as a lost race here, but
+    // it should never be silent: log it so a broken deployment is visible.
+    console.warn("Could not claim room", roomId, error);
+    return null;
   }
 };
 
-export const publishOffer = (roomId: string, offer: RTCSessionDescriptionInit) => {
+export const publishOffer = (
+  roomId: string,
+  offer: RTCSessionDescriptionInit,
+  pairId: string
+) => {
   if (!offer.type || !offer.sdp) {
     throw new Error("Offer is missing its type or SDP");
   }
 
   return updateDoc(roomDocRef(roomId), {
-    offer: { type: offer.type, sdp: offer.sdp } satisfies SignalDescription,
+    offer: {
+      type: offer.type,
+      sdp: offer.sdp,
+      pairId,
+    } satisfies TaggedSignal,
     status: "connecting",
     updatedAt: serverTimestamp(),
   });
@@ -190,15 +271,19 @@ export const publishOffer = (roomId: string, offer: RTCSessionDescriptionInit) =
 
 export const publishAnswer = (
   roomId: string,
-  answer: RTCSessionDescriptionInit
+  answer: RTCSessionDescriptionInit,
+  pairId: string
 ) => {
   if (!answer.type || !answer.sdp) {
     throw new Error("Answer is missing its type or SDP");
   }
 
   return updateDoc(roomDocRef(roomId), {
-    answer: { type: answer.type, sdp: answer.sdp } satisfies SignalDescription,
-    status: "connected",
+    answer: {
+      type: answer.type,
+      sdp: answer.sdp,
+      pairId,
+    } satisfies TaggedSignal,
     updatedAt: serverTimestamp(),
   });
 };
@@ -277,12 +362,14 @@ export const deleteRoomTree = async (roomId: string) => {
 };
 
 /**
- * Puts the room back into the matching pool after the joiner leaves.
+ * Puts the room back into the matching pool and drops everything that belonged
+ * to the previous pairing.
  */
 export const resetRoomForNextJoiner = async (roomId: string) => {
   await deleteCandidates(roomId);
   await updateDoc(roomDocRef(roomId), {
     status: "waiting",
+    pairId: null,
     joinedBy: null,
     offer: null,
     answer: null,
@@ -301,7 +388,7 @@ export const sweepStaleRooms = async (): Promise<number> => {
     query(
       collection(firestore, ROOMS_COLLECTION),
       where("updatedAt", "<", threshold),
-      limit(25)
+      limit(50)
     )
   );
 

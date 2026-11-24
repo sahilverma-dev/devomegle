@@ -191,6 +191,63 @@ test.describe("firestore signaling", () => {
     }
   });
 
+  test("does not pair a video searcher with a text searcher", async ({
+    browser,
+    request,
+  }) => {
+    await clearRooms(request);
+
+    const creator = await openUser(browser);
+    const joiner = await openUser(browser);
+
+    try {
+      await startVideo(creator.page);
+      await expect(
+        creator.page.getByText("Waiting for a stranger to join...")
+      ).toBeVisible();
+
+      await startText(joiner.page);
+      await expect(
+        joiner.page.getByText("Waiting for a stranger to join...")
+      ).toBeVisible();
+
+      // Both stay in their own pool: the two modes must never be mixed.
+      await expect(
+        creator.page.getByText("Waiting for a stranger to join...")
+      ).toBeVisible();
+      await expect.poll(() => roomCount(request)).toBe(2);
+    } finally {
+      await creator.context.close();
+      await joiner.context.close();
+    }
+  });
+
+  test("two strangers searching at the same time still match", async ({
+    browser,
+    request,
+  }) => {
+    await clearRooms(request);
+
+    const first = await openUser(browser);
+    const second = await openUser(browser);
+
+    try {
+      await Promise.all([startVideo(first.page), startVideo(second.page)]);
+
+      await expect
+        .poll(() => remoteVideoWidth(first.page), { timeout: 60_000 })
+        .toBeGreaterThan(0);
+      await expect
+        .poll(() => remoteVideoWidth(second.page), { timeout: 60_000 })
+        .toBeGreaterThan(0);
+
+      await expect.poll(() => roomCount(request)).toBe(1);
+    } finally {
+      await first.context.close();
+      await second.context.close();
+    }
+  });
+
   test("a closed tab releases the stranger instead of leaving stale data", async ({
     browser,
     request,
@@ -217,7 +274,7 @@ test.describe("firestore signaling", () => {
 
       await expect(
         creator.page.getByText("Waiting for a stranger to join...")
-      ).toBeVisible({ timeout: 60_000 });
+      ).toBeVisible({ timeout: 90_000 });
     } finally {
       await creator.context.close();
     }
