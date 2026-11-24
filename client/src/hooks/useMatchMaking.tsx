@@ -211,7 +211,13 @@ export const useMatchmaking = (authUser: User | null) => {
               );
           });
         },
-        (error) => console.error("Candidate listener failed", error)
+        (error) => {
+          // A room that was just deleted rejects reads of its subcollection.
+          // That only happens while we are tearing down, so it is not worth
+          // reporting unless the room is still the active one.
+          if (roomIdRef.current !== activeRoomId) return;
+          console.error("Candidate listener failed", error);
+        }
       );
     },
     []
