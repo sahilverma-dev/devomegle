@@ -8,3 +8,9 @@ firestore-debug.log
 ui-debug.log
 *.log
 .DS_Store
+
+# Secrets. The client has its own rule, but a root-level file must never be
+# committable either.
+.env
+.env.*
+!.env.example
