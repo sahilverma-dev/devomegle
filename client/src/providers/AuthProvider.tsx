@@ -9,14 +9,39 @@ import {
     GithubAuthProvider,
     GoogleAuthProvider,
     User,
+    getRedirectResult,
     onAuthStateChanged,
     signInAnonymously,
-    signInWithPopup,
+    signInWithRedirect,
     signOut,
 } from "firebase/auth";
 import Loader from "@/components/loader";
 import { env } from "@/lib/env";
 import { toast } from "sonner";
+
+/**
+ * Firebase has two browser OAuth flows: a popup (result arrives through the
+ * opener window) and a full-page redirect (result arrives in the same tab).
+ * A manually opened tab cannot complete either, because there is no channel to
+ * hand the credential back. Redirect is the one that survives browsers that
+ * block popups, so that is what the buttons use.
+ */
+const REDIRECT_PENDING_KEY = "devomegle:auth-redirect-pending";
+
+const loginErrorMessage = (error: any) => {
+    switch (error?.code) {
+        case "auth/unauthorized-domain":
+            return "This domain is not authorised for sign-in yet. Add it in Firebase → Authentication → Settings → Authorised domains.";
+        case "auth/account-exists-with-different-credential":
+            return "That email is already registered with a different sign-in method.";
+        case "auth/network-request-failed":
+            return "Network error. Check your connection and try again.";
+        case "auth/operation-not-supported-in-this-environment":
+            return "This browser cannot complete the sign-in. Try opening the site in your normal browser.";
+        default:
+            return error?.message || "Failed to login";
+    }
+};
 
 // interfaces
 export interface AuthContextReturnType {
@@ -29,24 +54,24 @@ export interface AuthContextReturnType {
 
 export const AuthContext = createContext<AuthContextReturnType | null>(null);
 
+const persistUser = async (currentUser: User) => {
+    await setDoc(
+        doc(firestore, `users/${currentUser.uid}`),
+        {
+            name: currentUser.displayName,
+            email: currentUser.email,
+            photoURL: currentUser.photoURL,
+            phoneNumber: currentUser.phoneNumber,
+            url: window.location.host,
+            timestamp: serverTimestamp(),
+        },
+        { merge: true }
+    );
+};
+
 const AuthProvider = ({ children }: PropsWithChildren) => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
-
-    const persistUser = async (currentUser: User) => {
-        await setDoc(
-            doc(firestore, `users/${currentUser.uid}`),
-            {
-                name: currentUser.displayName,
-                email: currentUser.email,
-                photoURL: currentUser.photoURL,
-                phoneNumber: currentUser.phoneNumber,
-                url: window.location.host,
-                timestamp: serverTimestamp(),
-            },
-            { merge: true }
-        );
-    };
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -57,27 +82,49 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
         return unsubscribe;
     }, []);
 
-    const loginWithGithub = async () => {
+    // Completes a redirect sign-in that started before the page unloaded.
+    useEffect(() => {
+        const pending = window.sessionStorage.getItem(REDIRECT_PENDING_KEY) === "1";
+
+        getRedirectResult(auth)
+            .then(async (result) => {
+                window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+
+                if (result?.user) {
+                    await persistUser(result.user);
+                    return;
+                }
+
+                // We sent the user to the provider and came back empty-handed,
+                // which means the browser dropped the result.
+                if (pending) {
+                    toast.error(
+                        "Sign-in did not complete. Please try again, or allow storage for this site."
+                    );
+                }
+            })
+            .catch((error) => {
+                window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+                console.log(error);
+                toast.error(loginErrorMessage(error));
+            });
+    }, []);
+
+    const loginWithProvider = async (provider: GithubAuthProvider | GoogleAuthProvider) => {
         try {
-            const provider = new GithubAuthProvider();
-            const { user: currentUser } = await signInWithPopup(auth, provider);
-            await persistUser(currentUser);
+            window.sessionStorage.setItem(REDIRECT_PENDING_KEY, "1");
+            // Navigates away; the effect above finishes the flow on return.
+            await signInWithRedirect(auth, provider);
         } catch (error: any) {
+            window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
             console.log(error);
-            toast.error(error?.message || "Failed to login");
+            toast.error(loginErrorMessage(error));
         }
     };
 
-    const loginWithGoogle = async () => {
-        try {
-            const provider = new GoogleAuthProvider();
-            const { user: currentUser } = await signInWithPopup(auth, provider);
-            await persistUser(currentUser);
-        } catch (error: any) {
-            console.log(error);
-            toast.error(error?.message || "Failed to login");
-        }
-    };
+    const loginWithGithub = () => loginWithProvider(new GithubAuthProvider());
+
+    const loginWithGoogle = () => loginWithProvider(new GoogleAuthProvider());
 
     // Only used against the Firebase emulator, where OAuth popups are not
     // available. Keeps the two-tab signaling test self-contained.
