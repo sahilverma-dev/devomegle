@@ -119,6 +119,22 @@ const nextRoomId = () =>
     .randomUUID()
     .slice(0, 8)}`;
 
+/**
+ * Firestore reports both "index missing" and "index still building" as a
+ * failed precondition naming the index.
+ */
+const isBuildingIndexError = (error: unknown) => {
+  if (typeof error !== "object" || error === null) return false;
+
+  const { code, message } = error as { code?: string; message?: string };
+
+  return (
+    code === "failed-precondition" &&
+    typeof message === "string" &&
+    message.toLowerCase().includes("index")
+  );
+};
+
 const isFreshRoom = (room: RoomWithId, now = Date.now()) => {
   const created = room.createdAt?.toMillis() ?? 0;
   const lastSeen = room.creatorLastSeen?.toMillis() ?? 0;
@@ -174,7 +190,20 @@ export const findWaitingRooms = async (
       orderBy("creatorLastSeen", "desc"),
       limit(50)
     )
-  );
+  ).catch((error: unknown) => {
+    if (!isBuildingIndexError(error)) throw error;
+
+    // A freshly deployed composite index takes a few minutes to build. Until
+    // then the pool is unreadable, but opening a room still works, so degrade
+    // to that instead of failing the whole search.
+    console.warn(
+      "Room pool is unavailable until the Firestore index finishes building",
+      error
+    );
+    return null;
+  });
+
+  if (!snapshot) return [];
 
   const now = Date.now();
   return snapshot.docs
