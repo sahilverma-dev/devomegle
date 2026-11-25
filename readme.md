@@ -73,6 +73,23 @@ Firebase value stops the app with a clear message instead of booting a client
 that cannot reach Firestore. With `VITE_USE_EMULATOR=true` the Firebase values
 may stay empty, because the demo project defaults are filled in.
 
+### Sign-in
+
+The buttons use `signInWithPopup`, which works even when the browser blocks
+third-party storage. If the browser refuses to open a popup at all, the app
+falls back to `signInWithRedirect`.
+
+Redirect only works when Firebase's OAuth helper (`/__/auth/*`) is served from
+the app's own origin. Both environments can do that — `vite.config.ts` proxies
+it in development and `vercel.json` rewrites it in production — but it is
+opt-in: point `VITE_AUTH_DOMAIN` at the app host instead of the
+`*.firebaseapp.com` one, and add that host under Firebase → Authentication →
+Settings → Authorised domains.
+
+Note that Google blocks OAuth in automated browsers, so a headless browser
+cannot complete a Google sign-in regardless of the flow; use the emulator's
+guest login for automated runs.
+
 ### TURN relay
 
 `client/api/turn.js` exchanges the Cloudflare TURN key for short-lived

@@ -12,6 +12,7 @@ import {
     getRedirectResult,
     onAuthStateChanged,
     signInAnonymously,
+    signInWithPopup,
     signInWithRedirect,
     signOut,
 } from "firebase/auth";
@@ -23,10 +24,20 @@ import { toast } from "sonner";
  * Firebase has two browser OAuth flows: a popup (result arrives through the
  * opener window) and a full-page redirect (result arrives in the same tab).
  * A manually opened tab cannot complete either, because there is no channel to
- * hand the credential back. Redirect is the one that survives browsers that
- * block popups, so that is what the buttons use.
+ * hand the credential back.
+ *
+ * The popup is used first: it keeps working when the browser blocks
+ * third-party storage, which is what a redirect needs. A redirect is only
+ * started when the browser refuses to open the popup at all.
  */
 const REDIRECT_PENDING_KEY = "devomegle:auth-redirect-pending";
+
+/** Codes that mean "this browser will not give us a popup", not "the user quit". */
+const POPUP_UNAVAILABLE_CODES = new Set([
+  "auth/popup-blocked",
+  "auth/operation-not-supported-in-this-environment",
+  "auth/internal-error",
+]);
 
 const loginErrorMessage = (error: any) => {
     switch (error?.code) {
@@ -112,13 +123,28 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
 
     const loginWithProvider = async (provider: GithubAuthProvider | GoogleAuthProvider) => {
         try {
-            window.sessionStorage.setItem(REDIRECT_PENDING_KEY, "1");
-            // Navigates away; the effect above finishes the flow on return.
-            await signInWithRedirect(auth, provider);
+            const { user: currentUser } = await signInWithPopup(auth, provider);
+            await persistUser(currentUser);
+            return;
         } catch (error: any) {
-            window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
-            console.log(error);
-            toast.error(loginErrorMessage(error));
+            if (!POPUP_UNAVAILABLE_CODES.has(error?.code)) {
+                console.log(error);
+                toast.error(loginErrorMessage(error));
+                return;
+            }
+
+            // The browser will not open a popup: fall back to a full-page
+            // redirect, which may still work when third-party storage is
+            // allowed.
+            try {
+                window.sessionStorage.setItem(REDIRECT_PENDING_KEY, "1");
+                // Navigates away; the effect above finishes the flow on return.
+                await signInWithRedirect(auth, provider);
+            } catch (redirectError: any) {
+                window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+                console.log(redirectError);
+                toast.error(loginErrorMessage(redirectError));
+            }
         }
     };
 

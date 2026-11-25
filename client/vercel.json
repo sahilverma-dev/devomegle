@@ -1,5 +1,13 @@
 {
-  "rewrites":  [
-    {"source": "/(.*)", "destination": "/"}
+  "rewrites": [
+    {
+      "source": "/__/auth/:path*",
+      "destination": "https://test-only-d2c6d.firebaseapp.com/__/auth/:path*"
+    },
+    {
+      "source": "/__/firebase/init.json",
+      "destination": "https://test-only-d2c6d.firebaseapp.com/__/firebase/init.json"
+    },
+    { "source": "/(.*)", "destination": "/" }
   ]
 }
