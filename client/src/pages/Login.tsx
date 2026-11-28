@@ -1,4 +1,3 @@
-import { FcGoogle as GoogleIcon } from "react-icons/fc";
 import { FaGithub as GithubIcon } from "react-icons/fa";
 import { ArrowUpRight, Ghost } from "lucide-react";
 import { Navigate } from "react-router-dom";
@@ -12,15 +11,16 @@ import { useAuth } from "@/hooks";
 import { env } from "@/lib/env";
 
 const Login = () => {
-  const { user, loginWithGithub, loginWithGoogle, loginAsGuest } = useAuth();
+  const { user, loginWithGithub, loginAsGuest } = useAuth();
 
   if (user) {
     return <Navigate to="/" replace />;
   }
 
   return (
-    <div className="relative grid min-h-dvh lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-      <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-white/[0.06] p-10 lg:flex xl:p-12">
+    <div className="relative flex min-h-dvh justify-center">
+      <div className="grid min-h-dvh w-full max-w-[1440px] min-[1440px]:border-x min-[1440px]:border-white/[0.05] lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+        <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-white/[0.06] p-10 lg:flex xl:p-12">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 bg-grid mask-fade-b opacity-60"
@@ -103,7 +103,7 @@ const Login = () => {
 
             <div className="mt-8 space-y-2.5">
               <Button
-                variant="secondary"
+                variant="primary"
                 size="lg"
                 className="w-full justify-between px-4"
                 onClick={() => void loginWithGithub()}
@@ -112,20 +112,7 @@ const Login = () => {
                   <GithubIcon className="h-[18px] w-[18px]" />
                   Continue with GitHub
                 </span>
-                <ArrowUpRight className="h-4 w-4 text-faint" />
-              </Button>
-
-              <Button
-                variant="secondary"
-                size="lg"
-                className="w-full justify-between px-4"
-                onClick={() => void loginWithGoogle()}
-              >
-                <span className="flex items-center gap-3">
-                  <GoogleIcon className="h-[18px] w-[18px]" />
-                  Continue with Google
-                </span>
-                <ArrowUpRight className="h-4 w-4 text-faint" />
+                <ArrowUpRight className="h-4 w-4 opacity-40" />
               </Button>
 
               {env.useEmulator && (
@@ -172,6 +159,7 @@ const Login = () => {
           <span>firebase auth</span>
         </div>
       </main>
+      </div>
     </div>
   );
 };
