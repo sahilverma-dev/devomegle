@@ -1,17 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  CameraIcon,
-  CameraOffIcon,
-  MessageCircleIcon,
-  MicIcon,
-  MicOffIcon,
-  SendIcon,
-  SkipForwardIcon,
-  XIcon,
+  Camera,
+  CameraOff,
+  Maximize2,
+  MessageCircle,
+  Mic,
+  MicOff,
+  Minimize2,
+  PhoneOff,
+  Send,
+  SkipForward,
+  Timer,
+  Video,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { StatusDot } from "@/components/ui/status-dot";
+import { Tooltip } from "@/components/ui/tooltip";
+import { formatDuration, useElapsed } from "@/hooks/useElapsed";
 import { useWebRTC } from "@/hooks";
 import type { SignalUser } from "@/firebase/rooms";
 import type { ChatStatus } from "@/hooks/useMatchMaking";
@@ -28,10 +41,168 @@ interface Props {
 }
 
 const initials = (user: SignalUser | null) =>
-  user?.displayName?.split(" ").join("").slice(0, 2) || "??";
+  (user?.displayName ?? "stranger")
+    .split(" ")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+const peerName = (user: SignalUser | null) => user?.displayName ?? "Stranger";
+
+const statusCopy = (status: ChatStatus, isPeerConnected: boolean) => {
+  if (isPeerConnected || status === "matched") {
+    return { label: "connected", tone: "live" as const };
+  }
+  if (status === "connecting") {
+    return { label: "connecting", tone: "pending" as const };
+  }
+  if (status === "waiting" || status === "searching") {
+    return { label: "waiting for peer", tone: "pending" as const };
+  }
+  return { label: "idle", tone: "offline" as const };
+};
+
+const WaitingState = ({
+  waiting,
+  onCancel,
+}: {
+  waiting: boolean;
+  onCancel: () => void;
+}) => (
+  <div className="flex flex-col items-center px-6 text-center">
+    <div className="relative grid h-28 w-28 place-items-center">
+      <span className="absolute inset-0 animate-ping-slow rounded-full border border-signal/20" />
+      <span className="absolute inset-0 rounded-full border border-white/[0.1]" />
+      <span className="absolute inset-4 rounded-full border border-white/[0.12]" />
+      <span
+        aria-hidden="true"
+        className="absolute inset-0 animate-scan rounded-full"
+        style={{
+          background:
+            "conic-gradient(from 0deg, transparent 0deg, hsl(var(--signal) / 0.38) 16deg, transparent 44deg)",
+          WebkitMaskImage:
+            "radial-gradient(circle, transparent 54%, black 68%, black 71%, transparent 73%)",
+          maskImage:
+            "radial-gradient(circle, transparent 54%, black 68%, black 71%, transparent 73%)",
+        }}
+      />
+      <span className="relative grid h-10 w-10 place-items-center rounded-xl border border-white/12 bg-white/[0.06]">
+        <MessageCircle className="h-4 w-4 text-foreground" />
+      </span>
+    </div>
+
+    <h2 className="mt-5 max-w-xs text-[16px] font-medium leading-snug tracking-[-0.02em] sm:text-lg">
+      {waiting ? "Waiting for a stranger to join..." : "Connecting to your match..."}
+    </h2>
+    <p className="mt-2 max-w-[17rem] text-[12px] leading-relaxed text-muted-foreground">
+      {waiting
+        ? "Keep this tab open. Your match will appear here."
+        : "Exchanging WebRTC descriptions over Firestore."}
+    </p>
+
+    <Button variant="secondary" size="sm" className="mt-5" onClick={onCancel}>
+      Cancel
+    </Button>
+  </div>
+);
+
+interface ControlButtonProps {
+  testId: string;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  active?: boolean;
+  danger?: boolean;
+  disabled?: boolean;
+  dataActive?: boolean;
+}
+
+/** Round on phones, squared on desktop: the same control at two densities. */
+const ControlButton = ({
+  testId,
+  label,
+  icon,
+  onClick,
+  active,
+  danger,
+  disabled,
+  dataActive,
+}: ControlButtonProps) => (
+  <Tooltip label={label} side="top">
+    <button
+      type="button"
+      data-testid={testId}
+      data-active={dataActive}
+      aria-label={label}
+      aria-pressed={dataActive}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "disabled:pointer-events-none disabled:opacity-40",
+        "md:h-11 md:w-11 md:gap-0 md:rounded-[11px]",
+        danger
+          ? "border-danger/30 bg-danger/15 text-danger hover:bg-danger/25"
+          : active
+            ? "border-white/[0.12] bg-white/[0.08] text-foreground hover:bg-white/[0.12]"
+            : "border-white/[0.09] bg-white/[0.03] text-muted-foreground hover:bg-white/[0.07] hover:text-foreground"
+      )}
+    >
+      {icon}
+      <span className="font-mono text-[8px] uppercase leading-none tracking-[0.12em] md:hidden">
+        {label}
+      </span>
+    </button>
+  </Tooltip>
+);
+
+interface WideControlProps {
+  testId: string;
+  label: string;
+  shortLabel: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}
+
+const WideControl = ({
+  testId,
+  label,
+  shortLabel,
+  icon,
+  onClick,
+  disabled,
+  danger,
+}: WideControlProps) => (
+  <button
+    type="button"
+    data-testid={testId}
+    onClick={onClick}
+    disabled={disabled}
+    className={cn(
+      "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px]",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      "disabled:pointer-events-none disabled:opacity-40",
+      "md:h-10 md:w-auto md:flex-row md:gap-2 md:rounded-[10px] md:px-4",
+      danger
+        ? "border-danger/40 bg-danger text-danger-foreground shadow-tactile hover:brightness-110"
+        : "border-white/10 bg-white/[0.04] text-foreground hover:bg-white/[0.08] md:bg-gradient-to-b md:from-white/[0.09] md:to-white/[0.03] md:shadow-tactile md:hover:border-white/20 md:hover:from-white/[0.14]"
+    )}
+  >
+    {icon}
+    <span className="font-mono text-[8px] uppercase leading-none tracking-[0.12em] md:hidden">
+      {shortLabel}
+    </span>
+    <span className="hidden text-[13px] font-medium md:inline">{label}</span>
+  </button>
+);
 
 const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
+  const stageRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
@@ -53,17 +224,29 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
   const [chatOpen, setChatOpen] = useState(mode === "text");
   const [draft, setDraft] = useState("");
   const [isLeaving, setIsLeaving] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const isTextMode = mode === "text";
   const isChatVisible = isTextMode || chatOpen;
   const isWaiting = status === "waiting" || status === "searching";
   const isConnecting = status === "connecting" && !isPeerConnected;
+  const showWaiting = isWaiting || isConnecting;
+  const elapsed = useElapsed(isPeerConnected);
+  const connection = statusCopy(status, isPeerConnected);
+  const displayName = stranger
+    ? peerName(stranger)
+    : isWaiting
+      ? "Waiting room"
+      : "Matching you...";
 
   useEffect(() => {
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream]);
+    if (previewVideoRef.current) {
+      previewVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, showWaiting]);
 
   useEffect(() => {
     if (remoteVideoRef.current) {
@@ -72,12 +255,28 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
   }, [remoteStream]);
 
   useEffect(() => {
-    if (!isTextMode) setChatOpen(false);
-  }, [isTextMode]);
+    messageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, isChatVisible]);
 
   useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const handleChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+
+    document.addEventListener("fullscreenchange", handleChange);
+    return () => document.removeEventListener("fullscreenchange", handleChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenEnabled) return;
+
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+
+    stageRef.current?.requestFullscreen().catch(() => {
+      toast.error("Fullscreen is not available");
+    });
+  };
 
   const handleEnd = async () => {
     if (isLeaving) return;
@@ -102,267 +301,546 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
   const handleSend = () => {
     const text = draft.trim();
     if (!text) return;
+
     if (!isDataChannelOpen) {
       toast.info("Waiting for the stranger to connect...");
       return;
     }
+
     sendChatMessage(text);
     setDraft("");
   };
 
   return (
-    <div className="min-h-screen w-full bg-neutral-950 text-neutral-100">
-      <div className="max-w-6xl w-full mx-auto min-h-screen flex flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-neutral-800 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className="text-lg font-bold text-blue-500">Devomegle</span>
-            <span className="rounded-full border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-400">
-              {isTextMode ? "Text chat" : "Video chat"}
+    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
+      <header className="relative z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/[0.06] bg-background/85 px-3 backdrop-blur-xl sm:h-16 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <Logo showWordmark={false} markClassName="h-7 w-7 rounded-lg" />
+          <span className="hidden h-4 w-px bg-white/10 md:block" />
+          <Badge variant="outline" className="hidden sm:inline-flex">
+            {mode === "video" ? (
+              <Video className="h-3 w-3" />
+            ) : (
+              <MessageCircle className="h-3 w-3" />
+            )}
+            {mode}
+          </Badge>
+
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-medium leading-tight tracking-[-0.01em]">
+              {displayName}
+            </p>
+            <p className="mt-1 flex items-center gap-1.5 font-mono text-[9px] uppercase leading-none tracking-[0.14em] text-faint">
+              <StatusDot
+                tone={connection.tone}
+                pulse={showWaiting}
+                className="h-1 w-1"
+              />
+              {connection.label}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="readout hidden items-center gap-1.5 px-2 py-1.5 sm:flex">
+            <Timer className="h-3 w-3 text-faint" />
+            <span className="font-mono text-[11px] tabular-nums leading-none text-muted-foreground">
+              {formatDuration(elapsed)}
             </span>
           </div>
+          <Avatar className="h-8 w-8 rounded-lg">
+            <AvatarImage src={stranger?.photoURL ?? undefined} />
+            <AvatarFallback className="text-[10px]">
+              {stranger ? initials(stranger) : "—"}
+            </AvatarFallback>
+          </Avatar>
+        </div>
+      </header>
 
-          <div className="flex items-center gap-2">
-            <span
+      <main className="relative flex min-h-0 flex-1 overflow-hidden md:gap-3 md:p-3">
+        {isTextMode && (
+          <aside className="hidden shrink-0 flex-col gap-3 md:flex md:w-[296px]">
+            <Card className="p-5">
+              <div className="flex items-center justify-between">
+                <span className="eyebrow">peer</span>
+                <StatusDot tone={connection.tone} pulse={showWaiting} />
+              </div>
+
+              <div className="mt-4 flex items-center gap-3">
+                <Avatar className="h-12 w-12 rounded-xl">
+                  <AvatarImage src={stranger?.photoURL ?? undefined} />
+                  <AvatarFallback className="text-xs">
+                    {initials(stranger)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate text-[15px] font-medium tracking-[-0.015em]">
+                    {displayName}
+                  </p>
+                  <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-faint">
+                    anonymous developer
+                  </p>
+                </div>
+              </div>
+
+              <dl className="mt-5 divide-y divide-white/[0.06] border-y border-white/[0.06]">
+                <div className="flex items-center justify-between py-2.5">
+                  <dt className="text-[12px] text-faint">Session</dt>
+                  <dd className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+                    {formatDuration(elapsed)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between py-2.5">
+                  <dt className="text-[12px] text-faint">Mode</dt>
+                  <dd className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+                    text
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between py-2.5">
+                  <dt className="text-[12px] text-faint">Messages</dt>
+                  <dd className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+                    {messages.length}
+                  </dd>
+                </div>
+              </dl>
+
+              <p className="mt-4 flex gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-signal" />
+                This conversation is peer-to-peer and disappears when the room
+                closes.
+              </p>
+            </Card>
+
+            <Card className="p-4">
+              <span className="eyebrow">house rules</span>
+              <ul className="mt-3 space-y-2.5 text-[12px] leading-relaxed text-muted-foreground">
+                <li>Be decent — skip instead of arguing.</li>
+                <li>No malware, scams, or spam links.</li>
+                <li>Share code, not personal data.</li>
+              </ul>
+            </Card>
+          </aside>
+        )}
+
+        {!isTextMode && (
+          <section
+            ref={stageRef}
+            className="relative flex-1 overflow-hidden bg-[#050506] md:rounded-2xl md:border md:border-white/[0.07]"
+          >
+            {showWaiting && localStream && (
+              <video
+                ref={previewVideoRef}
+                autoPlay
+                muted
+                playsInline
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover opacity-25 blur-[3px]"
+              />
+            )}
+
+            <video
+              ref={remoteVideoRef}
+              data-testid="remote-video"
+              autoPlay
+              playsInline
               className={cn(
-                "h-2 w-2 rounded-full",
-                isPeerConnected ? "bg-green-500" : "bg-amber-400"
+                "h-full w-full object-cover transition-opacity duration-500",
+                isPeerConnected ? "opacity-100" : "opacity-0"
               )}
             />
-            <span className="text-sm text-neutral-400">
-              {stranger?.displayName ?? "Stranger"}
-            </span>
-            <Avatar className="h-8 w-8 border border-neutral-700">
-              <AvatarImage src={stranger?.photoURL ?? undefined} />
-              <AvatarFallback>{initials(stranger)}</AvatarFallback>
-            </Avatar>
-          </div>
-        </header>
 
-        <div className="flex flex-1 flex-col gap-4 p-4">
-          <div className="relative flex flex-1 flex-col gap-4 md:flex-row">
-            {!isTextMode && (
-              <div className="relative flex-1 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-                <video
-                  ref={localVideoRef}
-                  data-testid="local-video"
-                  autoPlay
-                  muted
-                  playsInline
-                  className="h-full min-h-[220px] w-full object-cover"
-                />
-                <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-neutral-950/80 px-3 py-1 text-xs">
-                  <span className="h-2 w-2 rounded-full bg-green-500" />
-                  You
-                  {!isLocalMicActive && <MicOffIcon className="h-3 w-3" />}
-                  {!isLocalVideoActive && <CameraOffIcon className="h-3 w-3" />}
+            {isPeerConnected && !isRemoteVideoActive && (
+              <div className="absolute inset-0 grid place-items-center bg-[#08090a]">
+                <div className="flex flex-col items-center gap-3">
+                  <Avatar className="h-16 w-16 rounded-2xl">
+                    <AvatarImage src={stranger?.photoURL ?? undefined} />
+                    <AvatarFallback className="text-base">
+                      {initials(stranger)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">
+                    camera off
+                  </p>
                 </div>
               </div>
             )}
 
-            {!isTextMode && (
-              <div className="relative flex-1 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-                <video
-                  ref={remoteVideoRef}
-                  data-testid="remote-video"
-                  autoPlay
-                  playsInline
-                  className={cn(
-                    "h-full min-h-[220px] w-full object-cover",
-                    !isPeerConnected && "opacity-20"
-                  )}
-                />
-                <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-neutral-950/80 px-3 py-1 text-xs">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/50 to-transparent"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/60 to-transparent"
+            />
+
+            {!showWaiting && (
+              <>
+                <div className="absolute left-3 top-3 flex items-center gap-2 sm:left-4 sm:top-4">
                   <span
                     className={cn(
-                      "h-2 w-2 rounded-full",
-                      isPeerConnected ? "bg-green-500" : "bg-amber-400"
+                      "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] backdrop-blur-md",
+                      isPeerConnected
+                        ? "border-white/10 bg-black/45 text-white/85"
+                        : "border-warn/25 bg-black/45 text-warn"
                     )}
-                  />
-                  {stranger?.displayName ?? "Stranger"}
+                  >
+                    <StatusDot
+                      tone={isPeerConnected ? "live" : "pending"}
+                      pulse={!isPeerConnected}
+                      className="h-1 w-1"
+                    />
+                    {isPeerConnected ? "live" : "standby"}
+                  </span>
+                  <span className="hidden items-center rounded-md border border-white/10 bg-black/45 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-white/60 backdrop-blur-md sm:inline-flex">
+                    {mode}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label="Toggle fullscreen"
+                  className="absolute right-3 top-3 hidden h-9 w-9 place-items-center rounded-lg border border-white/10 bg-black/45 text-white/70 backdrop-blur-md transition-colors hover:bg-black/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 md:right-4 md:top-4 md:grid"
+                >
+                  {isFullscreen ? (
+                    <Minimize2 className="h-4 w-4" />
+                  ) : (
+                    <Maximize2 className="h-4 w-4" />
+                  )}
+                </button>
+
+                <div className="absolute bottom-3 left-3 hidden items-center gap-2 rounded-lg border border-white/10 bg-black/45 px-2.5 py-1.5 backdrop-blur-md sm:flex md:bottom-4 md:left-4">
+                  <span className="max-w-[160px] truncate text-[11px] text-white/85">
+                    {peerName(stranger)}
+                  </span>
                   {isPeerConnected && !isRemoteMicActive && (
-                    <MicOffIcon className="h-3 w-3" />
+                    <MicOff className="h-3 w-3 text-danger" />
                   )}
                   {isPeerConnected && !isRemoteVideoActive && (
-                    <CameraOffIcon className="h-3 w-3" />
+                    <CameraOff className="h-3 w-3 text-danger" />
                   )}
                 </div>
-              </div>
+              </>
             )}
 
-            {isChatVisible && (
+            <div
+              className={cn(
+                "absolute right-3 top-3 w-[88px] overflow-hidden rounded-xl border border-white/15 bg-black shadow-float md:bottom-4 md:left-auto md:right-4 md:top-auto md:w-52",
+                (chatOpen || showWaiting) && "hidden md:block",
+                showWaiting && "md:hidden"
+              )}
+            >
+              <video
+                ref={localVideoRef}
+                data-testid="local-video"
+                autoPlay
+                muted
+                playsInline
+                className="aspect-[3/4] h-full w-full -scale-x-100 object-cover md:aspect-video"
+              />
+              {!isLocalVideoActive && (
+                <div className="absolute inset-0 grid place-items-center bg-[#08090a]">
+                  <CameraOff className="h-4 w-4 text-white/40" />
+                </div>
+              )}
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 to-transparent px-2 py-1.5">
+                <span className="font-mono text-[8px] uppercase tracking-[0.14em] text-white/70">
+                  you
+                </span>
+                <span className="flex items-center gap-1">
+                  {!isLocalMicActive && (
+                    <MicOff className="h-2.5 w-2.5 text-danger" />
+                  )}
+                  {!isLocalVideoActive && (
+                    <CameraOff className="h-2.5 w-2.5 text-danger" />
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <AnimatePresence>
+              {showWaiting && (
+                <motion.div
+                  key="waiting"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute inset-0 z-20 flex items-center justify-center"
+                >
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-[#060607]/65 backdrop-blur-sm"
+                  />
+                  <div className="relative">
+                    <WaitingState
+                      waiting={isWaiting}
+                      onCancel={() => void handleEnd()}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+        )}
+
+        {isChatVisible && (
+          <>
+            {!isTextMode && (
               <div
-                data-testid="chat-panel"
-                data-open={isDataChannelOpen}
+                aria-hidden="true"
+                onClick={() => setChatOpen(false)}
+                className="absolute inset-0 top-0 z-20 animate-in fade-in bg-black/30 md:hidden"
+              />
+            )}
+
+            <div
+              data-testid="chat-panel"
+              data-open={isDataChannelOpen}
+              className={cn(
+                "z-30 flex min-h-0 flex-col overflow-hidden border-white/10 bg-[#0d0e10]",
+                "absolute inset-x-0 bottom-0 top-[16%] animate-sheet-in rounded-t-2xl border-t shadow-float",
+                "md:static md:z-auto md:animate-none md:rounded-2xl md:border md:shadow-panel",
+                isTextMode
+                  ? "top-0 rounded-none border-t-0 md:flex-1"
+                  : "md:w-[352px] md:shrink-0"
+              )}
+            >
+              <div
                 className={cn(
-                  "flex w-full flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900",
-                  isTextMode ? "flex-1" : "md:w-80"
+                  "mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-white/15 md:hidden",
+                  isTextMode && "hidden"
+                )}
+              />
+
+              <div
+                className={cn(
+                  "flex h-11 shrink-0 items-center justify-between gap-2 px-3",
+                  isTextMode && "hidden md:flex"
                 )}
               >
-                <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2 text-sm">
-                  <span className="flex items-center gap-2">
-                    <MessageCircleIcon className="h-4 w-4" />
-                    Chat
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-white/10 bg-white/[0.04]">
+                    <MessageCircle className="h-3 w-3 text-muted-foreground" />
+                  </span>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    chat
+                  </span>
+                  <span className="h-3 w-px bg-white/10" />
+                  <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-faint">
+                    {isDataChannelOpen ? "open" : "standby"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-faint sm:block">
+                    {messages.length} msg
                   </span>
                   {!isTextMode && (
                     <button
+                      type="button"
                       onClick={() => setChatOpen(false)}
-                      className="text-neutral-400 hover:text-neutral-100"
+                      aria-label="Close chat"
+                      className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60"
                     >
-                      <XIcon className="h-4 w-4" />
+                      <X className="h-4 w-4" />
                     </button>
                   )}
                 </div>
+              </div>
 
-                <div className="flex-1 space-y-2 overflow-y-auto p-3 text-sm">
-                  {messages.length === 0 && (
-                    <p className="text-center text-xs text-neutral-500">
+              <div
+                className={cn(
+                  "scrollbar-thin flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 pb-3 pt-3",
+                  isTextMode && "pt-4 md:pt-1"
+                )}
+              >
+                {messages.length === 0 ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                    <span className="grid h-11 w-11 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.03]">
+                      <MessageCircle className="h-4 w-4 text-faint" />
+                    </span>
+                    <p className="text-[13px] font-medium tracking-[-0.01em]">
                       {isDataChannelOpen
                         ? "Say hi to your match"
                         : "Chat opens when your match connects"}
                     </p>
-                  )}
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={cn(
-                        "max-w-[85%] rounded-lg px-3 py-2",
-                        message.from === "me"
-                          ? "ml-auto bg-blue-600 text-white"
-                          : "bg-neutral-800 text-neutral-100"
-                      )}
-                    >
-                      {message.text}
-                    </div>
-                  ))}
-                  <div ref={messageEndRef} />
-                </div>
+                    <p className="max-w-[220px] text-[12px] leading-relaxed text-muted-foreground">
+                      {isDataChannelOpen
+                        ? "Messages stay in this room and disappear when you leave."
+                        : "Keep this tab open. You will be connected automatically."}
+                    </p>
+                  </div>
+                ) : (
+                  messages.map((message) => {
+                    const mine = message.from === "me";
+                    return (
+                      <motion.div
+                        key={message.id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{
+                          duration: 0.18,
+                          ease: [0.22, 1, 0.36, 1],
+                        }}
+                        className={cn(
+                          "flex",
+                          mine ? "justify-end" : "justify-start"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "max-w-[86%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-[13px] leading-relaxed",
+                            mine
+                              ? "rounded-br-md bg-primary text-primary-foreground"
+                              : "rounded-bl-md border border-white/[0.06] bg-white/[0.055] text-foreground"
+                          )}
+                        >
+                          {message.text}
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
+                <div ref={messageEndRef} />
+              </div>
 
-                <div className="flex items-center gap-2 border-t border-neutral-800 p-2">
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleSend();
+                }}
+                className="shrink-0 border-t border-white/[0.06] p-2.5 md:p-3"
+              >
+                <div className="flex items-end gap-2 rounded-xl border border-white/10 bg-black/40 p-1 shadow-recessed transition-colors focus-within:border-signal/40">
                   <input
                     value={draft}
                     data-testid="chat-input"
                     onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") handleSend();
-                    }}
-                    placeholder="Type a message..."
-                    className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                    placeholder={
+                      isDataChannelOpen
+                        ? "Type a message..."
+                        : "Waiting for connection..."
+                    }
+                    autoComplete="off"
+                    enterKeyHint="send"
+                    aria-label="Message"
+                    className="h-10 min-w-0 flex-1 bg-transparent px-2.5 text-base text-foreground outline-none placeholder:text-faint md:h-9 md:text-[13px]"
                   />
                   <button
-                    onClick={handleSend}
+                    type="submit"
                     data-testid="send-message"
-                    className="rounded-lg bg-blue-600 p-2 hover:bg-blue-700"
                     aria-label="Send message"
+                    disabled={!draft.trim()}
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-[opacity,transform] duration-150 hover:bg-primary/90 active:translate-y-[0.5px] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 md:h-9 md:w-9"
                   >
-                    <SendIcon className="h-4 w-4" />
+                    <Send className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
-            )}
+                <p className="mt-2 hidden px-1 font-mono text-[9px] uppercase tracking-[0.14em] text-faint md:block">
+                  enter to send · messages disappear on leave
+                </p>
+              </form>
+            </div>
+          </>
+        )}
 
-            <AnimatePresence>
-              {(isWaiting || isConnecting) && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl bg-neutral-950/70 backdrop-blur-sm"
-                >
-                  <div className="relative">
-                    <div className="absolute inset-0 animate-ping rounded-full bg-blue-500/30" />
-                    <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900">
-                      <MessageCircleIcon className="h-7 w-7 animate-pulse text-blue-400" />
-                    </div>
-                  </div>
-                  <h2 className="text-lg font-semibold">
-                    {isWaiting
-                      ? "Waiting for a stranger to join..."
-                      : "Connecting to your match..."}
-                  </h2>
-                  <p className="text-sm text-neutral-400">
-                    {isWaiting
-                      ? "Keep this tab open. Your match will appear here."
-                      : "Exchanging WebRTC descriptions over Firestore."}
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+        {isTextMode && (
+          <AnimatePresence>
+            {showWaiting && (
+              <motion.div
+                key="text-waiting"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="absolute inset-0 z-40 flex items-center justify-center bg-background/85 backdrop-blur-md md:rounded-2xl"
+              >
+                <WaitingState
+                  waiting={isWaiting}
+                  onCancel={() => void handleEnd()}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
+      </main>
+
+      <div className="relative z-20 shrink-0 border-t border-white/[0.06] bg-background/90 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:px-3 md:pb-3 md:pt-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
+            {isTextMode && (
+              <span className="flex items-center gap-2 truncate pl-1 font-mono text-[9px] uppercase tracking-[0.14em] text-faint">
+                <StatusDot
+                  tone={connection.tone}
+                  pulse={showWaiting}
+                  className="h-1 w-1"
+                />
+                {messages.length} msg · p2p
+              </span>
+            )}
+            {!isTextMode && (
+              <>
+                <ControlButton
+                  testId="toggle-mic"
+                  label="mic"
+                  dataActive={isLocalMicActive}
+                  active={isLocalMicActive}
+                  danger={!isLocalMicActive}
+                  onClick={toggleLocalMic}
+                  icon={
+                    isLocalMicActive ? (
+                      <Mic className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                    ) : (
+                      <MicOff className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                    )
+                  }
+                />
+                <ControlButton
+                  testId="toggle-camera"
+                  label="cam"
+                  dataActive={isLocalVideoActive}
+                  active={isLocalVideoActive}
+                  danger={!isLocalVideoActive}
+                  onClick={toggleLocalVideo}
+                  icon={
+                    isLocalVideoActive ? (
+                      <Camera className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                    ) : (
+                      <CameraOff className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                    )
+                  }
+                />
+                <ControlButton
+                  testId="toggle-chat"
+                  label="chat"
+                  active={chatOpen}
+                  onClick={() => setChatOpen((current) => !current)}
+                  icon={<MessageCircle className="h-[18px] w-[18px] md:h-4 md:w-4" />}
+                />
+              </>
+            )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-            <div className="flex items-center gap-2">
-              {!isTextMode && (
-                <>
-                  <button
-                    onClick={toggleLocalMic}
-                    className={cn(
-                      "rounded-lg p-3 transition-colors",
-                      isLocalMicActive
-                        ? "bg-neutral-700 hover:bg-neutral-600"
-                        : "bg-red-600 hover:bg-red-700"
-                    )}
-                    aria-label="Toggle microphone"
-                    data-testid="toggle-mic"
-                    data-active={isLocalMicActive}
-                  >
-                    {isLocalMicActive ? <MicIcon /> : <MicOffIcon />}
-                  </button>
-                  <button
-                    onClick={toggleLocalVideo}
-                    className={cn(
-                      "rounded-lg p-3 transition-colors",
-                      isLocalVideoActive
-                        ? "bg-neutral-700 hover:bg-neutral-600"
-                        : "bg-red-600 hover:bg-red-700"
-                    )}
-                    aria-label="Toggle camera"
-                    data-testid="toggle-camera"
-                    data-active={isLocalVideoActive}
-                  >
-                    {isLocalVideoActive ? (
-                      <CameraIcon />
-                    ) : (
-                      <CameraOffIcon />
-                    )}
-                  </button>
-                </>
-              )}
-              {!isTextMode && (
-                <button
-                  onClick={() => setChatOpen((current) => !current)}
-                  className={cn(
-                    "rounded-lg p-3 transition-colors",
-                    chatOpen
-                      ? "bg-blue-600 hover:bg-blue-700"
-                      : "bg-neutral-700 hover:bg-neutral-600"
-                  )}
-                  aria-label="Toggle text chat"
-                  data-testid="toggle-chat"
-                >
-                  <MessageCircleIcon />
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleEnd}
-                disabled={isLeaving}
-                data-testid="end-chat"
-                className="rounded-lg bg-red-600 px-5 py-3 font-medium transition-colors hover:bg-red-700 disabled:opacity-60"
-              >
-                End Chat
-              </button>
-              <button
-                onClick={handleNext}
-                disabled={isLeaving}
-                data-testid="next-person"
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium transition-colors hover:bg-blue-700 disabled:opacity-60"
-              >
-                <SkipForwardIcon className="h-4 w-4" />
-                Next Person
-              </button>
-            </div>
+          <div className="flex items-center gap-1.5 md:gap-2">
+            <WideControl
+              testId="next-person"
+              label="Next person"
+              shortLabel="next"
+              disabled={isLeaving}
+              onClick={() => void handleNext()}
+              icon={<SkipForward className="h-[18px] w-[18px] md:h-4 md:w-4" />}
+            />
+            <WideControl
+              testId="end-chat"
+              label="End chat"
+              shortLabel="end"
+              danger
+              disabled={isLeaving}
+              onClick={() => void handleEnd()}
+              icon={<PhoneOff className="h-[18px] w-[18px] md:h-4 md:w-4" />}
+            />
           </div>
         </div>
       </div>
