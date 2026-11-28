@@ -933,7 +933,7 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
       </main>
 
       <div className="relative z-20 shrink-0 border-t border-white/[0.06] bg-background/90 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:px-3 md:pb-3 md:pt-3">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-2">
+        <div className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
             {isTextMode && (
               <span className="flex items-center gap-2 truncate pl-1 font-mono text-[9px] uppercase tracking-[0.14em] text-faint">
