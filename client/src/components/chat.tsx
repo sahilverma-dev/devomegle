@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import {
   Camera,
   CameraOff,
@@ -138,7 +138,7 @@ const ControlButton = ({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px]",
+        "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px] active:scale-[0.97]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         "disabled:pointer-events-none disabled:opacity-40",
         "md:h-11 md:w-11 md:gap-0 md:rounded-[11px]",
@@ -182,7 +182,7 @@ const WideControl = ({
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px]",
+      "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px] active:scale-[0.97]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       "disabled:pointer-events-none disabled:opacity-40",
       "md:h-10 md:w-auto md:flex-row md:gap-2 md:rounded-[10px] md:px-4",
@@ -225,6 +225,7 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
   const [draft, setDraft] = useState("");
   const [isLeaving, setIsLeaving] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const dragControls = useDragControls();
 
   const isTextMode = mode === "text";
   const isChatVisible = isTextMode || chatOpen;
@@ -595,9 +596,19 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
               />
             )}
 
-            <div
+            <motion.div
               data-testid="chat-panel"
               data-open={isDataChannelOpen}
+              drag={isTextMode ? false : "y"}
+              dragControls={dragControls}
+              dragListener={false}
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.5 }}
+              onDragEnd={(_, info) => {
+                if (info.offset.y > 96 || info.velocity.y > 700) {
+                  setChatOpen(false);
+                }
+              }}
               className={cn(
                 "z-30 flex min-h-0 flex-col overflow-hidden border-white/10 bg-[#0d0e10]",
                 "absolute inset-x-0 bottom-0 top-[16%] animate-sheet-in rounded-t-2xl border-t shadow-float",
@@ -608,11 +619,14 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
               )}
             >
               <div
+                onPointerDown={(event) => dragControls.start(event)}
                 className={cn(
-                  "mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-white/15 md:hidden",
+                  "flex shrink-0 cursor-grab touch-none items-center justify-center py-2 md:hidden",
                   isTextMode && "hidden"
                 )}
-              />
+              >
+                <span className="h-1 w-9 rounded-full bg-white/15" />
+              </div>
 
               <div
                 className={cn(
@@ -742,7 +756,7 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                   enter to send · messages disappear on leave
                 </p>
               </form>
-            </div>
+            </motion.div>
           </>
         )}
 
