@@ -1,5 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
+/**
+ * The dev server port is configurable so a test run can stay off a port that
+ * another local project already holds.
+ */
+const PORT = Number(process.env.E2E_PORT ?? 3000);
+const BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 120_000,
@@ -8,7 +15,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: BASE_URL,
     trace: "retain-on-failure",
   },
   projects: [
@@ -28,9 +35,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "bun run dev --host 127.0.0.1",
+    command: `bun run dev --host 127.0.0.1 --port ${PORT}`,
     cwd: "./client",
-    url: "http://127.0.0.1:3000",
+    url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
