@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { User } from "firebase/auth";
 import { toast } from "sonner";
 import {
   HEARTBEAT_INTERVAL_MS,
@@ -57,7 +56,7 @@ interface Presence {
   changedAt: number;
 }
 
-export const useMatchmaking = (authUser: User | null) => {
+export const useMatchmaking = (authUser: SignalUser | null) => {
   const webrtc = useWebRTC();
   const webrtcRef = useRef(webrtc);
   webrtcRef.current = webrtc;
@@ -659,7 +658,7 @@ export const useMatchmaking = (authUser: User | null) => {
    */
   const claimAnyRoom = useCallback(
     async (
-      user: User,
+      user: SignalUser,
       nextMode: MediaMode,
       generation: number,
       ownRoomId?: string

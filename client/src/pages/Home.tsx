@@ -1,13 +1,30 @@
+import { useMemo } from "react";
+
 import Chat from "@/components/chat";
 import Lobby from "@/components/lobby";
 import Searching from "@/components/searching";
 import { useAuth } from "@/hooks";
 import { useMatchmaking } from "@/hooks/useMatchMaking";
+import type { SignalUser } from "@/firebase/rooms";
 
 const Home = () => {
-  const { user } = useAuth();
+  const { user, githubUrl } = useAuth();
+
+  const profile = useMemo<SignalUser | null>(
+    () =>
+      user
+        ? {
+            uid: user.uid,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+            githubUrl,
+          }
+        : null,
+    [user, githubUrl]
+  );
+
   const { status, roomId, mode, stranger, start, leave, next } =
-    useMatchmaking(user);
+    useMatchmaking(profile);
 
   if (status === "lobby") {
     return (

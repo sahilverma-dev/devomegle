@@ -4,20 +4,26 @@ import { createContext, useState, useEffect, PropsWithChildren } from "react";
 
 // firebase
 import { auth, firestore } from "../firebase/config";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import {
     GithubAuthProvider,
     GoogleAuthProvider,
     User,
+    getAdditionalUserInfo,
     getRedirectResult,
     onAuthStateChanged,
     signInAnonymously,
     signInWithPopup,
     signInWithRedirect,
     signOut,
+    type UserCredential,
 } from "firebase/auth";
 import Loader from "@/components/loader";
 import { env } from "@/lib/env";
+import {
+    githubUrlForUsername,
+    safeGithubUrl,
+} from "@/lib/github";
 import { toast } from "sonner";
 
 /**
@@ -57,6 +63,7 @@ const loginErrorMessage = (error: any) => {
 // interfaces
 export interface AuthContextReturnType {
     user: User | null;
+    githubUrl: string | null;
     loginWithGoogle: () => Promise<void>;
     loginWithGithub: () => Promise<void>;
     loginAsGuest: () => Promise<void>;
@@ -65,7 +72,38 @@ export interface AuthContextReturnType {
 
 export const AuthContext = createContext<AuthContextReturnType | null>(null);
 
-const persistUser = async (currentUser: User) => {
+const GITHUB_CACHE_PREFIX = "devomegle:github-url:";
+
+const cacheGithubUrl = (uid: string, url: string | null) => {
+    try {
+        if (url) window.localStorage.setItem(`${GITHUB_CACHE_PREFIX}${uid}`, url);
+        else window.localStorage.removeItem(`${GITHUB_CACHE_PREFIX}${uid}`);
+    } catch {
+        // Private mode: the in-memory state still carries the URL.
+    }
+};
+
+const readCachedGithubUrl = (uid: string) => {
+    try {
+        return safeGithubUrl(
+            window.localStorage.getItem(`${GITHUB_CACHE_PREFIX}${uid}`)
+        );
+    } catch {
+        return null;
+    }
+};
+
+/** GitHub's provider info carries the username, which is what we need to link. */
+const githubUrlFromCredential = (credential: UserCredential) => {
+    const info = getAdditionalUserInfo(credential);
+    return info?.providerId === "github.com"
+        ? githubUrlForUsername(info.username)
+        : null;
+};
+
+const persistUser = async (currentUser: User, githubUrl: string | null) => {
+    const githubUsername = githubUrl?.split("/").pop() ?? null;
+
     await setDoc(
         doc(firestore, `users/${currentUser.uid}`),
         {
@@ -75,6 +113,7 @@ const persistUser = async (currentUser: User) => {
             phoneNumber: currentUser.phoneNumber,
             url: window.location.host,
             timestamp: serverTimestamp(),
+            ...(githubUsername ? { githubUsername } : {}),
         },
         { merge: true }
     );
@@ -82,12 +121,36 @@ const persistUser = async (currentUser: User) => {
 
 const AuthProvider = ({ children }: PropsWithChildren) => {
     const [user, setUser] = useState<User | null>(null);
+    const [githubUrl, setGithubUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
+            setGithubUrl(
+                currentUser ? readCachedGithubUrl(currentUser.uid) : null
+            );
             setLoading(false);
+
+            if (!currentUser) return;
+
+            // A fresh device has no cache yet; the profile document does.
+            void getDoc(doc(firestore, `users/${currentUser.uid}`))
+                .then((snapshot) => {
+                    if (auth.currentUser?.uid !== currentUser.uid) return;
+                    if (readCachedGithubUrl(currentUser.uid)) return;
+
+                    const url = githubUrlForUsername(
+                        snapshot.data()?.githubUsername
+                    );
+                    if (!url) return;
+
+                    cacheGithubUrl(currentUser.uid, url);
+                    setGithubUrl(url);
+                })
+                .catch(() => {
+                    // A missing profile document just means no GitHub link.
+                });
         });
 
         return unsubscribe;
@@ -102,7 +165,12 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
                 window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
 
                 if (result?.user) {
-                    await persistUser(result.user);
+                    const url = githubUrlFromCredential(result);
+                    if (url) {
+                        cacheGithubUrl(result.user.uid, url);
+                        setGithubUrl(url);
+                    }
+                    await persistUser(result.user, url);
                     return;
                 }
 
@@ -123,8 +191,15 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
 
     const loginWithProvider = async (provider: GithubAuthProvider | GoogleAuthProvider) => {
         try {
-            const { user: currentUser } = await signInWithPopup(auth, provider);
-            await persistUser(currentUser);
+            const credential = await signInWithPopup(auth, provider);
+            const url = githubUrlFromCredential(credential);
+
+            if (url) {
+                cacheGithubUrl(credential.user.uid, url);
+                setGithubUrl(url);
+            }
+
+            await persistUser(credential.user, url);
             return;
         } catch (error: any) {
             if (!POPUP_UNAVAILABLE_CODES.has(error?.code)) {
@@ -157,7 +232,7 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
     const loginAsGuest = async () => {
         try {
             const { user: currentUser } = await signInAnonymously(auth);
-            await persistUser(currentUser);
+            await persistUser(currentUser, null);
         } catch (error: any) {
             console.log(error);
             toast.error(error?.message || "Failed to login as guest");
@@ -170,6 +245,7 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
         <AuthContext.Provider
             value={{
                 user,
+                githubUrl,
                 loginWithGithub,
                 loginWithGoogle,
                 loginAsGuest,

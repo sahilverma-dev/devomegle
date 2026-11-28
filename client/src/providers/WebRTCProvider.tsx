@@ -48,6 +48,10 @@ interface WebRTCContextValue {
   ) => void;
   toggleLocalMic: () => void;
   toggleLocalVideo: () => void;
+  selectDevice: (
+    kind: "audio" | "video",
+    deviceId: string
+  ) => Promise<boolean>;
   sendChatMessage: (text: string) => void;
   clearChat: () => void;
 }
@@ -414,6 +418,69 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
     sendControlState();
   }, [sendControlState]);
 
+  /**
+   * Swaps one local track for the same kind from another physical device.
+   * `replaceTrack` keeps the existing transceivers, so the peer does not have
+   * to renegotiate and the call never drops.
+   */
+  const selectDevice = useCallback(
+    async (kind: "audio" | "video", deviceId: string) => {
+      const current = localStreamRef.current;
+      if (!current || !deviceId) return false;
+
+      const replacement = await navigator.mediaDevices.getUserMedia(
+        kind === "audio"
+          ? { audio: { deviceId: { exact: deviceId } }, video: false }
+          : { audio: false, video: { deviceId: { exact: deviceId } } }
+      );
+
+      const nextTrack =
+        kind === "audio"
+          ? replacement.getAudioTracks()[0]
+          : replacement.getVideoTracks()[0];
+
+      if (!nextTrack) {
+        stopStream(replacement);
+        return false;
+      }
+
+      nextTrack.enabled =
+        kind === "audio" ? micActiveRef.current : videoActiveRef.current;
+
+      const previousTracks =
+        kind === "audio"
+          ? current.getAudioTracks()
+          : current.getVideoTracks();
+
+      try {
+        const peer = peerRef.current;
+        const senders =
+          peer?.getSenders().filter((sender) => sender.track?.kind === kind) ??
+          [];
+
+        await Promise.all(
+          senders.map((sender) => sender.replaceTrack(nextTrack))
+        );
+      } catch (error) {
+        console.error("Failed to swap media track", error);
+        stopStream(replacement);
+        return false;
+      }
+
+      previousTracks.forEach((track) => {
+        current.removeTrack(track);
+        track.stop();
+      });
+      current.addTrack(nextTrack);
+
+      // A new MediaStream identity makes the local preview re-read its tracks.
+      setLocalStream(new MediaStream(current.getTracks()));
+
+      return true;
+    },
+    []
+  );
+
   const sendChatMessage = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -473,6 +540,7 @@ export const WebRTCProvider = ({ children }: PropsWithChildren) => {
         setOnIceCandidate,
         toggleLocalMic,
         toggleLocalVideo,
+        selectDevice,
         sendChatMessage,
         clearChat,
       }}

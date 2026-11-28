@@ -1,4 +1,3 @@
-import type { User } from "firebase/auth";
 import {
   addDoc,
   collection,
@@ -49,6 +48,7 @@ export interface SignalUser {
   uid: string;
   displayName: string | null;
   photoURL: string | null;
+  githubUrl: string | null;
 }
 
 export interface SignalDescription {
@@ -93,10 +93,11 @@ export interface ClaimResult {
   room: RoomWithId;
 }
 
-export const toSignalUser = (user: User): SignalUser => ({
+export const toSignalUser = (user: SignalUser): SignalUser => ({
   uid: user.uid,
-  displayName: user.displayName,
-  photoURL: user.photoURL,
+  displayName: user.displayName ?? null,
+  photoURL: user.photoURL ?? null,
+  githubUrl: user.githubUrl ?? null,
 });
 
 export const roomDocRef = (roomId: string) =>
@@ -149,7 +150,7 @@ const isFreshRoom = (room: RoomWithId, now = Date.now()) => {
  * Creates an open room owned by `user`. Only one offerer (creator) per room.
  */
 export const createRoom = async (
-  user: User,
+  user: SignalUser,
   mode: RoomMode
 ): Promise<string> => {
   const roomId = nextRoomId();
@@ -177,7 +178,7 @@ export const createRoom = async (
  * of abandoned rooms can never crowd real matches out of the result window.
  */
 export const findWaitingRooms = async (
-  user: User,
+  user: SignalUser,
   mode: RoomMode
 ): Promise<RoomWithId[]> => {
   const cutoff = Timestamp.fromMillis(Date.now() - STALE_AFTER_MS);
@@ -220,7 +221,7 @@ export const findWaitingRooms = async (
  */
 export const claimRoom = async (
   roomId: string,
-  user: User,
+  user: SignalUser,
   mode: RoomMode
 ): Promise<ClaimResult | null> => {
   const ref = roomDocRef(roomId);

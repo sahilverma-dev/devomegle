@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import {
+  ArrowLeftRight,
+  ArrowUpRight,
   Camera,
   CameraOff,
+  Github,
   Maximize2,
   MessageCircle,
   Mic,
@@ -18,6 +21,8 @@ import {
 import { toast } from "sonner";
 
 import Logo from "@/components/logo";
+import DeviceMenu from "@/components/device-menu";
+import VideoLayoutPicker from "@/components/video-layout-picker";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +34,14 @@ import { useWebRTC } from "@/hooks";
 import type { SignalUser } from "@/firebase/rooms";
 import type { ChatStatus } from "@/hooks/useMatchMaking";
 import type { MediaMode } from "@/providers/WebRTCProvider";
+import { safeGithubUrl } from "@/lib/github";
+import {
+  readFlipped,
+  readVideoLayout,
+  writeFlipped,
+  writeVideoLayout,
+  type VideoLayout,
+} from "@/lib/video-layout";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -60,6 +73,49 @@ const statusCopy = (status: ChatStatus, isPeerConnected: boolean) => {
     return { label: "waiting for peer", tone: "pending" as const };
   }
   return { label: "idle", tone: "offline" as const };
+};
+
+const PaneBadge = ({
+  name,
+  muted,
+  cameraOff,
+  compact,
+  className,
+}: {
+  name: string;
+  muted?: boolean;
+  cameraOff?: boolean;
+  compact?: boolean;
+  className?: string;
+}) => {
+  if (compact) {
+    return (
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 to-transparent px-2 py-1.5">
+        <span className="truncate font-mono text-[9px] uppercase tracking-[0.14em] text-white/70">
+          {name}
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          {muted && <MicOff className="h-2.5 w-2.5 text-danger" />}
+          {cameraOff && <CameraOff className="h-2.5 w-2.5 text-danger" />}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "pointer-events-none absolute z-10 flex items-center gap-1.5 rounded-md border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-md",
+        className
+      )}
+    >
+      <span className="max-w-[150px] truncate text-[11px] text-white/85">
+        {name}
+      </span>
+      {muted && <MicOff className="h-3 w-3 text-danger" />}
+      {cameraOff && <CameraOff className="h-3 w-3 text-danger" />}
+    </div>
+  );
 };
 
 const WaitingState = ({
@@ -138,10 +194,10 @@ const ControlButton = ({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px] active:scale-[0.97]",
+        "flex h-12 w-12 items-center justify-center rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px] active:scale-[0.97]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         "disabled:pointer-events-none disabled:opacity-40",
-        "md:h-11 md:w-11 md:gap-0 md:rounded-[11px]",
+        "md:h-11 md:w-11 md:rounded-[11px]",
         danger
           ? "border-danger/30 bg-danger/15 text-danger hover:bg-danger/25"
           : active
@@ -150,9 +206,6 @@ const ControlButton = ({
       )}
     >
       {icon}
-      <span className="font-mono text-[9px] uppercase leading-none tracking-[0.12em] md:hidden">
-        {label}
-      </span>
     </button>
   </Tooltip>
 );
@@ -160,7 +213,6 @@ const ControlButton = ({
 interface WideControlProps {
   testId: string;
   label: string;
-  shortLabel: string;
   icon: ReactNode;
   onClick: () => void;
   disabled?: boolean;
@@ -170,7 +222,6 @@ interface WideControlProps {
 const WideControl = ({
   testId,
   label,
-  shortLabel,
   icon,
   onClick,
   disabled,
@@ -179,10 +230,11 @@ const WideControl = ({
   <button
     type="button"
     data-testid={testId}
+    aria-label={label}
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      "flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px] active:scale-[0.97]",
+      "flex h-12 w-12 items-center justify-center rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:translate-y-[0.5px] active:scale-[0.97]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       "disabled:pointer-events-none disabled:opacity-40",
       "md:h-10 md:w-auto md:flex-row md:gap-2 md:rounded-[10px] md:px-4",
@@ -192,9 +244,6 @@ const WideControl = ({
     )}
   >
     {icon}
-    <span className="font-mono text-[9px] uppercase leading-none tracking-[0.12em] md:hidden">
-      {shortLabel}
-    </span>
     <span className="hidden text-[13px] font-medium md:inline">{label}</span>
   </button>
 );
@@ -225,6 +274,8 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
   const [draft, setDraft] = useState("");
   const [isLeaving, setIsLeaving] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [layout, setLayout] = useState<VideoLayout>(() => readVideoLayout());
+  const [flipped, setFlipped] = useState(() => readFlipped());
   const dragControls = useDragControls();
 
   const isTextMode = mode === "text";
@@ -234,11 +285,21 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
   const showWaiting = isWaiting || isConnecting;
   const elapsed = useElapsed(isPeerConnected);
   const connection = statusCopy(status, isPeerConnected);
+  const isPip = layout === "pip";
   const displayName = stranger
     ? peerName(stranger)
     : isWaiting
       ? "Waiting room"
       : "Matching you...";
+  const githubProfile = safeGithubUrl(stranger?.githubUrl);
+
+  useEffect(() => {
+    writeVideoLayout(layout);
+  }, [layout]);
+
+  useEffect(() => {
+    writeFlipped(flipped);
+  }, [flipped]);
 
   useEffect(() => {
     if (localVideoRef.current) {
@@ -340,9 +401,37 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
               {connection.label}
             </p>
           </div>
+
+          {githubProfile && (
+            <a
+              href={githubProfile}
+              target="_blank"
+              rel="noreferrer noopener"
+              aria-label={`Open ${displayName}'s GitHub profile`}
+              title="GitHub profile"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <Github className="h-4 w-4" />
+            </a>
+          )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {!isTextMode && (
+            <>
+              <VideoLayoutPicker value={layout} onChange={setLayout} />
+              <button
+                type="button"
+                onClick={() => setFlipped((current) => !current)}
+                aria-label="Swap videos"
+                aria-pressed={flipped}
+                className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <ArrowLeftRight className="h-4 w-4" />
+              </button>
+              <DeviceMenu />
+            </>
+          )}
           <div className="readout hidden items-center gap-1.5 px-2 py-1.5 sm:flex">
             <Timer className="h-3 w-3 text-faint" />
             <span className="font-mono text-[11px] tabular-nums leading-none text-muted-foreground">
@@ -383,6 +472,21 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                   </p>
                 </div>
               </div>
+
+              {githubProfile && (
+                <a
+                  href={githubProfile}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="mt-4 flex h-9 items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 text-[12px] text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60"
+                >
+                  <span className="flex items-center gap-2">
+                    <Github className="h-3.5 w-3.5" />
+                    GitHub profile
+                  </span>
+                  <ArrowUpRight className="h-3.5 w-3.5 text-faint" />
+                </a>
+              )}
 
               <dl className="mt-5 divide-y divide-white/[0.06] border-y border-white/[0.06]">
                 <div className="flex items-center justify-between py-2.5">
@@ -426,9 +530,11 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
         {!isTextMode && (
           <section
             ref={stageRef}
+            data-layout={layout}
+            data-flipped={flipped}
             className="relative flex-1 overflow-hidden bg-[#050506] md:rounded-2xl md:border md:border-white/[0.07]"
           >
-            {showWaiting && localStream && (
+            {isPip && showWaiting && localStream && (
               <video
                 ref={previewVideoRef}
                 autoPlay
@@ -439,70 +545,162 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
               />
             )}
 
-            <video
-              ref={remoteVideoRef}
-              data-testid="remote-video"
-              autoPlay
-              playsInline
+            <div
               className={cn(
-                "h-full w-full object-cover transition-opacity duration-500",
-                isPeerConnected ? "opacity-100" : "opacity-0"
+                "relative h-full w-full min-h-0",
+                isPip ? "block" : "grid gap-2 p-2 md:gap-3 md:p-3",
+                layout === "split" &&
+                  "grid-rows-2 md:grid-cols-2 md:grid-rows-1",
+                layout === "call" &&
+                  "grid-rows-[minmax(0,1fr)_32%] md:grid-cols-[minmax(0,1fr)_minmax(200px,26%)] md:grid-rows-1"
               )}
-            />
+            >
+              <div
+                data-testid="remote-pane"
+                className={cn(
+                  "relative min-h-0 min-w-0 overflow-hidden bg-black",
+                  isPip
+                    ? !flipped
+                      ? cn("absolute inset-0", showWaiting && "bg-transparent")
+                      : cn(
+                          "absolute right-3 top-3 z-10 aspect-[3/4] w-[88px] rounded-xl border border-white/15 shadow-float md:bottom-4 md:left-auto md:right-4 md:top-auto md:aspect-video md:w-52",
+                          showWaiting && "hidden"
+                        )
+                    : cn(
+                        "rounded-xl border border-white/[0.08]",
+                        flipped && "order-2"
+                      )
+                )}
+              >
+                <video
+                  ref={remoteVideoRef}
+                  data-testid="remote-video"
+                  autoPlay
+                  playsInline
+                  className={cn(
+                    "h-full w-full object-cover transition-opacity duration-500",
+                    isPeerConnected ? "opacity-100" : "opacity-0"
+                  )}
+                />
 
-            {isPeerConnected && !isRemoteVideoActive && (
-              <div className="absolute inset-0 grid place-items-center bg-[#08090a]">
-                <div className="flex flex-col items-center gap-3">
-                  <Avatar className="h-16 w-16 rounded-2xl">
-                    <AvatarImage src={stranger?.photoURL ?? undefined} />
-                    <AvatarFallback className="text-base">
-                      {initials(stranger)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">
-                    camera off
-                  </p>
-                </div>
+                {isPeerConnected && !isRemoteVideoActive && (
+                  <div className="absolute inset-0 grid place-items-center bg-[#08090a]">
+                    {isPip && flipped ? (
+                      <CameraOff className="h-4 w-4 text-white/40" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-3">
+                        <Avatar className="h-16 w-16 rounded-2xl">
+                          <AvatarImage src={stranger?.photoURL ?? undefined} />
+                          <AvatarFallback className="text-base">
+                            {initials(stranger)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">
+                          camera off
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <PaneBadge
+                  name={peerName(stranger)}
+                  muted={isPeerConnected && !isRemoteMicActive}
+                  cameraOff={isPeerConnected && !isRemoteVideoActive}
+                  compact={isPip && flipped}
+                  className={
+                    isPip
+                      ? "bottom-3 left-3 md:bottom-4 md:left-4"
+                      : "left-2 top-2"
+                  }
+                />
               </div>
-            )}
 
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/50 to-transparent"
-            />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/60 to-transparent"
-            />
+              <div
+                data-testid="local-pane"
+                className={cn(
+                  "relative min-h-0 min-w-0 overflow-hidden bg-black",
+                  isPip
+                    ? flipped
+                      ? "absolute inset-0"
+                      : cn(
+                          "absolute right-3 top-3 z-10 aspect-[3/4] w-[88px] rounded-xl border border-white/15 shadow-float md:bottom-4 md:left-auto md:right-4 md:top-auto md:aspect-video md:w-52",
+                          showWaiting && "hidden"
+                        )
+                    : cn(
+                        "rounded-xl border border-white/[0.08]",
+                        flipped && "order-1"
+                      )
+                )}
+              >
+                <video
+                  ref={localVideoRef}
+                  data-testid="local-video"
+                  autoPlay
+                  muted
+                  playsInline
+                  className="h-full w-full -scale-x-100 object-cover"
+                />
+
+                {!isLocalVideoActive && (
+                  <div className="absolute inset-0 grid place-items-center bg-[#08090a]">
+                    {isPip && !flipped ? (
+                      <CameraOff className="h-4 w-4 text-white/40" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2">
+                        <CameraOff className="h-5 w-5 text-white/40" />
+                        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">
+                          camera off
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <PaneBadge
+                  name="You"
+                  muted={!isLocalMicActive}
+                  cameraOff={!isLocalVideoActive}
+                  compact={isPip && !flipped}
+                  className={
+                    isPip
+                      ? "bottom-3 left-3 md:bottom-4 md:left-4"
+                      : "left-2 top-2"
+                  }
+                />
+              </div>
+            </div>
 
             {!showWaiting && (
               <>
-                <div className="absolute left-3 top-3 flex items-center gap-2 sm:left-4 sm:top-4">
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] backdrop-blur-md",
-                      isPeerConnected
-                        ? "border-white/10 bg-black/45 text-white/85"
-                        : "border-warn/25 bg-black/45 text-warn"
-                    )}
-                  >
-                    <StatusDot
-                      tone={isPeerConnected ? "live" : "pending"}
-                      pulse={!isPeerConnected}
-                      className="h-1 w-1"
-                    />
-                    {isPeerConnected ? "live" : "standby"}
-                  </span>
-                  <span className="hidden items-center rounded-md border border-white/10 bg-black/45 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-white/60 backdrop-blur-md sm:inline-flex">
-                    {mode}
-                  </span>
-                </div>
+                {isPip && (
+                  <div className="absolute left-3 top-3 flex items-center gap-2 sm:left-4 sm:top-4">
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] backdrop-blur-md",
+                        isPeerConnected
+                          ? "border-white/10 bg-black/45 text-white/85"
+                          : "border-warn/25 bg-black/45 text-warn"
+                      )}
+                    >
+                      <StatusDot
+                        tone={isPeerConnected ? "live" : "pending"}
+                        pulse={!isPeerConnected}
+                        className="h-1 w-1"
+                      />
+                      {isPeerConnected ? "live" : "standby"}
+                    </span>
+                    <span className="hidden items-center rounded-md border border-white/10 bg-black/45 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-white/60 backdrop-blur-md sm:inline-flex">
+                      {mode}
+                    </span>
+                  </div>
+                )}
 
                 <button
                   type="button"
                   onClick={toggleFullscreen}
                   aria-label="Toggle fullscreen"
-                  className="absolute right-3 top-3 hidden h-9 w-9 place-items-center rounded-lg border border-white/10 bg-black/45 text-white/70 backdrop-blur-md transition-colors hover:bg-black/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 md:right-4 md:top-4 md:grid"
+                  className="absolute right-3 top-3 z-10 hidden h-9 w-9 place-items-center rounded-lg border border-white/10 bg-black/45 text-white/70 backdrop-blur-md transition-colors hover:bg-black/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60 md:right-4 md:top-4 md:grid"
                 >
                   {isFullscreen ? (
                     <Minimize2 className="h-4 w-4" />
@@ -510,55 +708,8 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                     <Maximize2 className="h-4 w-4" />
                   )}
                 </button>
-
-                <div className="absolute bottom-3 left-3 hidden items-center gap-2 rounded-lg border border-white/10 bg-black/45 px-2.5 py-1.5 backdrop-blur-md sm:flex md:bottom-4 md:left-4">
-                  <span className="max-w-[160px] truncate text-[11px] text-white/85">
-                    {peerName(stranger)}
-                  </span>
-                  {isPeerConnected && !isRemoteMicActive && (
-                    <MicOff className="h-3 w-3 text-danger" />
-                  )}
-                  {isPeerConnected && !isRemoteVideoActive && (
-                    <CameraOff className="h-3 w-3 text-danger" />
-                  )}
-                </div>
               </>
             )}
-
-            <div
-              className={cn(
-                "absolute right-3 top-3 w-[88px] overflow-hidden rounded-xl border border-white/15 bg-black shadow-float md:bottom-4 md:left-auto md:right-4 md:top-auto md:w-52",
-                (chatOpen || showWaiting) && "hidden md:block",
-                showWaiting && "md:hidden"
-              )}
-            >
-              <video
-                ref={localVideoRef}
-                data-testid="local-video"
-                autoPlay
-                muted
-                playsInline
-                className="aspect-[3/4] h-full w-full -scale-x-100 object-cover md:aspect-video"
-              />
-              {!isLocalVideoActive && (
-                <div className="absolute inset-0 grid place-items-center bg-[#08090a]">
-                  <CameraOff className="h-4 w-4 text-white/40" />
-                </div>
-              )}
-              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 to-transparent px-2 py-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-white/70">
-                  you
-                </span>
-                <span className="flex items-center gap-1">
-                  {!isLocalMicActive && (
-                    <MicOff className="h-2.5 w-2.5 text-danger" />
-                  )}
-                  {!isLocalVideoActive && (
-                    <CameraOff className="h-2.5 w-2.5 text-danger" />
-                  )}
-                </span>
-              </div>
-            </div>
 
             <AnimatePresence>
               {showWaiting && (
@@ -805,9 +956,9 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                   onClick={toggleLocalMic}
                   icon={
                     isLocalMicActive ? (
-                      <Mic className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                      <Mic className="h-5 w-5 md:h-4 md:w-4" />
                     ) : (
-                      <MicOff className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                      <MicOff className="h-5 w-5 md:h-4 md:w-4" />
                     )
                   }
                 />
@@ -820,9 +971,9 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                   onClick={toggleLocalVideo}
                   icon={
                     isLocalVideoActive ? (
-                      <Camera className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                      <Camera className="h-5 w-5 md:h-4 md:w-4" />
                     ) : (
-                      <CameraOff className="h-[18px] w-[18px] md:h-4 md:w-4" />
+                      <CameraOff className="h-5 w-5 md:h-4 md:w-4" />
                     )
                   }
                 />
@@ -831,7 +982,7 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                   label="chat"
                   active={chatOpen}
                   onClick={() => setChatOpen((current) => !current)}
-                  icon={<MessageCircle className="h-[18px] w-[18px] md:h-4 md:w-4" />}
+                  icon={<MessageCircle className="h-5 w-5 md:h-4 md:w-4" />}
                 />
               </>
             )}
@@ -841,19 +992,17 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
             <WideControl
               testId="next-person"
               label="Next person"
-              shortLabel="next"
               disabled={isLeaving}
               onClick={() => void handleNext()}
-              icon={<SkipForward className="h-[18px] w-[18px] md:h-4 md:w-4" />}
+              icon={<SkipForward className="h-5 w-5 md:h-4 md:w-4" />}
             />
             <WideControl
               testId="end-chat"
               label="End chat"
-              shortLabel="end"
               danger
               disabled={isLeaving}
               onClick={() => void handleEnd()}
-              icon={<PhoneOff className="h-[18px] w-[18px] md:h-4 md:w-4" />}
+              icon={<PhoneOff className="h-5 w-5 md:h-4 md:w-4" />}
             />
           </div>
         </div>
