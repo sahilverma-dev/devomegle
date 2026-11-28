@@ -150,7 +150,7 @@ const ControlButton = ({
       )}
     >
       {icon}
-      <span className="font-mono text-[8px] uppercase leading-none tracking-[0.12em] md:hidden">
+      <span className="font-mono text-[9px] uppercase leading-none tracking-[0.12em] md:hidden">
         {label}
       </span>
     </button>
@@ -192,7 +192,7 @@ const WideControl = ({
     )}
   >
     {icon}
-    <span className="font-mono text-[8px] uppercase leading-none tracking-[0.12em] md:hidden">
+    <span className="font-mono text-[9px] uppercase leading-none tracking-[0.12em] md:hidden">
       {shortLabel}
     </span>
     <span className="hidden text-[13px] font-medium md:inline">{label}</span>
@@ -546,7 +546,7 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
                 </div>
               )}
               <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 to-transparent px-2 py-1.5">
-                <span className="font-mono text-[8px] uppercase tracking-[0.14em] text-white/70">
+                <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-white/70">
                   you
                 </span>
                 <span className="flex items-center gap-1">
