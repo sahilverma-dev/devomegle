@@ -375,7 +375,7 @@ const Chat = ({ status, mode, stranger, onEnd, onNext }: Props) => {
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
-      <header className="relative z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/[0.06] bg-background/85 px-3 backdrop-blur-xl sm:h-16 sm:px-4">
+      <header className="relative z-40 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/[0.06] bg-background/85 px-3 backdrop-blur-xl sm:h-16 sm:px-4">
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <Logo showWordmark={false} markClassName="h-7 w-7 rounded-lg" />
           <span className="hidden h-4 w-px bg-white/10 md:block" />
